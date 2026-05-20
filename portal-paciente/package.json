@@ -1,0 +1,20 @@
+{
+  "name": "psychflow-portal-paciente",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/react": "^4.3.0",
+    "@astrojs/vercel": "^8.0.0",
+    "@supabase/supabase-js": "^2.106.0",
+    "astro": "^4.16.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}

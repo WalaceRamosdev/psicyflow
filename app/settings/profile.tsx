@@ -9,7 +9,8 @@ import {
   SafeAreaView,
   Alert,
   Clipboard,
-  Switch
+  Switch,
+  Share
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useClinicStore } from '../../src/services/clinicAPI';
@@ -38,11 +39,21 @@ export default function ProfessionalSettingsScreen() {
   const [lunchStart, setLunchStart] = useState<string>(profile.bookingRules.lunchStart);
   const [lunchEnd, setLunchEnd] = useState<string>(profile.bookingRules.lunchEnd);
 
-  const shareLink = `https://${domain || 'psychflow.com'}/agendar?prof=${profile.id}`;
+  const shareLink = `http://localhost:4321/${domain || profile.id}`;
 
   const handleCopyLink = () => {
     Clipboard.setString(shareLink);
-    Alert.alert("Link Copiado", "Seu link único de agendamento online foi copiado para a área de transferência!");
+    Alert.alert("Link Copiado", "Seu link de agendamento foi copiado para a área de transferência!");
+  };
+
+  const handleShareLink = async () => {
+    try {
+      await Share.share({
+        message: `Olá! Agende sua consulta de psicoterapia de forma simples e segura pelo meu portal: ${shareLink}`,
+      });
+    } catch (err) {
+      Alert.alert("Erro", "Não foi possível compartilhar o link.");
+    }
   };
 
   const handleSaveSettings = async () => {
@@ -138,9 +149,15 @@ export default function ProfessionalSettingsScreen() {
               <Text style={styles.linkLabel}>Link de Agendamento Online:</Text>
               <Text style={styles.linkUrl} numberOfLines={1}>{shareLink}</Text>
               
-              <TouchableOpacity style={styles.copyBtn} onPress={handleCopyLink}>
-                <Text style={styles.copyBtnText}>Copiar Link de Divulgação 📋</Text>
-              </TouchableOpacity>
+              <View style={styles.buttonRow}>
+                <TouchableOpacity style={[styles.copyBtn, { flex: 1, marginRight: 8 }]} onPress={handleCopyLink}>
+                  <Text style={styles.copyBtnText}>Copiar Link 📋</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.shareBtn, { flex: 1 }]} onPress={handleShareLink}>
+                  <Text style={styles.shareBtnText}>Compartilhar 🔗</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Access telemetry statistics */}
@@ -393,10 +410,26 @@ const styles = StyleSheet.create({
     height: 38,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 12,
   },
   copyBtnText: {
     color: '#4F46E5',
+    fontSize: 11,
+    fontWeight: 'bold',
+  },
+  buttonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  shareBtn: {
+    backgroundColor: '#4F46E5',
+    borderRadius: 10,
+    height: 38,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  shareBtnText: {
+    color: '#FFFFFF',
     fontSize: 11,
     fontWeight: 'bold',
   },

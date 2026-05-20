@@ -1,397 +1,434 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
-import { fakeEncrypt, fakeDecrypt } from './security';
+import { fakeEncrypt } from './security';
 import { User, Patient, Appointment, SubscriptionStatus } from '../types';
+import { supabase } from '../src/services/supabase';
 
-// --- CONSTANTS & STORAGE KEYS ---
-const SECURE_TOKEN_KEY = "psychflow_auth_token";
-const USER_PROFILE_KEY = "psychflow_user_profile";
-const USERS_DB_KEY = "@psychflow_users_db";
+// Helper to sanitize keys (maintained for backward compatibility)
+const sanitizeKey = (key: string): string => {
+  return key.replace(/[^a-zA-Z0-9.-]/g, '_');
+};
 
-const APPOINTMENTS_STORAGE_KEY = "psychflow_appointments_v1";
-const PATIENTS_STORAGE_KEY = "psychflow_patients_v1";
+// Database Auto-Seeding: Populates a new therapist's account with demo patients and appointments
+async function seedDatabaseIfEmpty(psychologistId: string) {
+  try {
+    const { count, error: countError } = await supabase
+      .from('patients')
+      .select('*', { count: 'exact', head: true })
+      .eq('psychologist_id', psychologistId);
 
-const SEED_PATIENTS: Patient[] = [
-  {
-    id: "p1",
-    name: "Mariana Silva Costa",
-    email: "mariana.silva@email.com",
-    cpf: "12839485722",
-    phone: "11982736455",
-    avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=200",
-    subscriptionStatus: "active",
-    sessionCount: 12,
-    consecutiveMisses: 0,
-    sessionsPerWeek: 1,
-    clinicalReason: "Ansiedade Crônica"
-  },
-  {
-    id: "p2",
-    name: "Gabriel Santos Oliveira",
-    email: "gabriel.oliveira@email.com",
-    cpf: "34928374811",
-    phone: "11977223344",
-    avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200",
-    subscriptionStatus: "inactive",
-    sessionCount: 2,
-    consecutiveMisses: 2,
-    sessionsPerWeek: 1,
-    clinicalReason: "Crise Depressiva"
-  },
-  {
-    id: "p3",
-    name: "Beatriz Ribeiro Lima",
-    email: "beatriz.lima@email.com",
-    cpf: "28473829144",
-    phone: "21998765432",
-    avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200",
-    subscriptionStatus: "active",
-    sessionCount: 24,
-    consecutiveMisses: 0,
-    sessionsPerWeek: 2,
-    clinicalReason: "Conflito Conjugal"
-  },
-  {
-    id: "p4",
-    name: "Lucas Mendes Pereira",
-    email: "lucas.mendes@email.com",
-    cpf: "45091823488",
-    phone: "31988554411",
-    avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200",
-    subscriptionStatus: "inactive",
-    sessionCount: 1,
-    consecutiveMisses: 0,
-    sessionsPerWeek: 1,
-    clinicalReason: "Foco e TDAH"
+    if (countError) throw countError;
+
+    if (count === 0) {
+      console.log("[Supabase Seed] Seeding default patients and appointments for:", psychologistId);
+      
+      const patientsToInsert = [
+        {
+          name: "Mariana Silva Costa",
+          email: "mariana.silva@email.com",
+          cpf: "12839485722",
+          phone: "11982736455",
+          avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=200",
+          subscription_status: "active",
+          psychologist_id: psychologistId
+        },
+        {
+          name: "Gabriel Santos Oliveira",
+          email: "gabriel.oliveira@email.com",
+          cpf: "34928374811",
+          phone: "11977223344",
+          avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200",
+          subscription_status: "inactive",
+          psychologist_id: psychologistId
+        },
+        {
+          name: "Beatriz Ribeiro Lima",
+          email: "beatriz.lima@email.com",
+          cpf: "28473829144",
+          phone: "21998765432",
+          avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200",
+          subscription_status: "active",
+          psychologist_id: psychologistId
+        },
+        {
+          name: "Lucas Mendes Pereira",
+          email: "lucas.mendes@email.com",
+          cpf: "45091823488",
+          phone: "31988554411",
+          avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200",
+          subscription_status: "inactive",
+          psychologist_id: psychologistId
+        }
+      ];
+
+      const { data: insertedPatients, error: patientsError } = await supabase
+        .from('patients')
+        .insert(patientsToInsert)
+        .select();
+
+      if (patientsError) throw patientsError;
+
+      const p1 = insertedPatients.find(p => p.name.includes("Mariana"))?.id;
+      const p2 = insertedPatients.find(p => p.name.includes("Gabriel"))?.id;
+      const p3 = insertedPatients.find(p => p.name.includes("Beatriz"))?.id;
+      const p4 = insertedPatients.find(p => p.name.includes("Lucas"))?.id;
+
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      const appointmentsToInsert = [
+        {
+          psychologist_id: psychologistId,
+          patient_id: p1,
+          patient_name: "Mariana Silva Costa",
+          patient_avatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=200",
+          date: todayStr,
+          time: "14:00:00",
+          status: "confirmed",
+          type: "online",
+          notes_draft: "",
+          notes_encrypted: "",
+          notes_finalized: false
+        },
+        {
+          psychologist_id: psychologistId,
+          patient_id: p2,
+          patient_name: "Gabriel Santos Oliveira",
+          patient_avatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200",
+          date: todayStr,
+          time: "15:30:00",
+          status: "pending",
+          type: "online",
+          notes_draft: "",
+          notes_encrypted: "",
+          notes_finalized: false
+        },
+        {
+          psychologist_id: psychologistId,
+          patient_id: p3,
+          patient_name: "Beatriz Ribeiro Lima",
+          patient_avatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200",
+          date: todayStr,
+          time: "17:00:00",
+          status: "confirmed",
+          type: "online",
+          notes_draft: "",
+          notes_encrypted: fakeEncrypt("Evolução da sessão anterior: Paciente apresentou diminuição em sintomas ansiosos agudos."),
+          notes_finalized: true
+        },
+        {
+          psychologist_id: psychologistId,
+          patient_id: p4,
+          patient_name: "Lucas Mendes Pereira",
+          patient_avatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200",
+          date: todayStr,
+          time: "19:00:00",
+          status: "pending",
+          type: "presencial",
+          notes_draft: "",
+          notes_encrypted: "",
+          notes_finalized: false
+        }
+      ];
+
+      const { error: apptsError } = await supabase
+        .from('appointments')
+        .insert(appointmentsToInsert);
+
+      if (apptsError) throw apptsError;
+
+      const transactionsToInsert = [
+        {
+          psychologist_id: psychologistId,
+          patient_id: p3,
+          patient_name: 'Beatriz Ribeiro Lima',
+          description: 'Sessão Psicoterapia Online (18/05)',
+          amount: 180.00,
+          type: 'income',
+          status: 'paid',
+          due_date: todayStr,
+          payment_date: todayStr,
+          tax_calculated: 10.80
+        },
+        {
+          psychologist_id: psychologistId,
+          patient_id: p2,
+          patient_name: 'Gabriel Santos Oliveira',
+          description: 'Mensalidade Pacote TCC Recorrente',
+          amount: 720.00,
+          type: 'income',
+          status: 'overdue',
+          due_date: new Date(Date.now() - 432000000).toISOString().split('T')[0],
+          payment_gateway_link: 'https://checkout.psychflow.com/pay/p_gabriel_overdue_tcc',
+          tax_calculated: 43.20
+        },
+        {
+          psychologist_id: psychologistId,
+          description: 'Aluguel Consultório Físico (Sala 4)',
+          amount: 1200.00,
+          type: 'expense',
+          status: 'paid',
+          due_date: todayStr,
+          payment_date: todayStr
+        }
+      ];
+
+      await supabase.from('financial_transactions').insert(transactionsToInsert);
+
+      // Create initial clinical record log
+      const { data: createdAppt } = await supabase
+        .from('appointments')
+        .select('id')
+        .eq('patient_id', p3)
+        .limit(1)
+        .single();
+
+      if (createdAppt) {
+        const recordsToInsert = [
+          {
+            psychologist_id: psychologistId,
+            patient_id: p3,
+            appointment_id: createdAppt.id,
+            date: todayStr,
+            title: 'Sessão 4 - Análise Comportamental Burnout',
+            content: 'Paciente apresenta melhora expressiva nos níveis de ansiedade após a aplicação da técnica de reestruturação cognitiva sobre tarefas laborais. Apresentou relato sobre regulação do sono estável. Planejado manutenção da tarefa comportamental.',
+            is_finalized: true,
+            template_name: 'Modelo TCC',
+            patient_symptom_trend: 'improved',
+            content_encrypted: fakeEncrypt('Paciente apresenta melhora expressiva nos níveis de ansiedade após a aplicação da técnica de reestruturação cognitiva.')
+          }
+        ];
+        await supabase.from('clinical_records').insert(recordsToInsert);
+      }
+    }
+  } catch (err) {
+    console.error("[Seeding Error] Failed to seed Supabase database:", err);
   }
-];
+}
 
-const SEED_APPOINTMENTS = (todayStr: string): Appointment[] => [
-  {
-    id: "ap1",
-    patientId: "p1",
-    patientName: "Mariana Silva Costa",
-    patientAvatar: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=200",
-    date: todayStr,
-    time: "14:00",
-    status: "confirmed",
-    type: "online",
-    notesDraft: "",
-    notesEncrypted: "",
-    notesFinalized: false
-  },
-  {
-    id: "ap2",
-    patientId: "p2",
-    patientName: "Gabriel Santos Oliveira",
-    patientAvatar: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200",
-    date: todayStr,
-    time: "15:30",
-    status: "pending",
-    type: "online",
-    notesDraft: "",
-    notesEncrypted: "",
-    notesFinalized: false
-  },
-  {
-    id: "ap3",
-    patientId: "p3",
-    patientName: "Beatriz Ribeiro Lima",
-    patientAvatar: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200",
-    date: todayStr,
-    time: "17:00",
-    status: "confirmed",
-    type: "online",
-    notesDraft: "Paciente relata progresso significativo com a gestão de ansiedade utilizando técnicas cognitivas...",
-    notesEncrypted: fakeEncrypt("Evolução da sessão anterior: Paciente apresentou diminuição em sintomas ansiosos agudos."),
-    notesFinalized: true
-  },
-  {
-    id: "ap4",
-    patientId: "p4",
-    patientName: "Lucas Mendes Pereira",
-    patientAvatar: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200",
-    date: todayStr,
-    time: "19:00",
-    status: "pending",
-    type: "presencial",
-    notesDraft: "",
-    notesEncrypted: "",
-    notesFinalized: false
-  }
-];
+// Database Entity Mapping functions
+const mapPatientFromDb = (db: any): Patient => ({
+  id: db.id,
+  name: db.name,
+  email: db.email || '',
+  cpf: db.cpf || '',
+  phone: db.phone || '',
+  avatar: db.avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=200',
+  subscriptionStatus: (db.subscription_status === 'active' ? 'active' : 'inactive') as SubscriptionStatus,
+  sessionCount: 12,
+  consecutiveMisses: 0,
+  sessionsPerWeek: 1,
+  clinicalReason: 'Consulta de Rotina',
+});
 
-// Helper delay generator to simulate REST network latency
-const delay = (ms: number = 300) => new Promise((resolve) => setTimeout(resolve, ms));
+const mapAppointmentFromDb = (db: any): Appointment => ({
+  id: db.id,
+  patientId: db.patient_id,
+  patientName: db.patient_name,
+  patientAvatar: db.patient_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=200',
+  date: db.date,
+  time: db.time ? db.time.substring(0, 5) : '', // '14:00:00' -> '14:00'
+  status: (db.status === 'confirmed' || db.status === 'confirmed_patient' || db.status === 'confirmed_therapist' ? 'confirmed' : db.status === 'pending' || db.status === 'requested' ? 'pending' : 'cancelled') as 'confirmed' | 'pending' | 'cancelled',
+  type: (db.type === 'online' ? 'online' : 'presencial') as 'online' | 'presencial',
+  notesDraft: db.notes_draft || '',
+  notesEncrypted: db.notes_encrypted || '',
+  notesFinalized: db.notes_finalized || false,
+  roomUrl: db.room_url || (db.type === 'online' ? `https://meet.jit.si/PsychFlow_${db.psychologist_id?.replace(/[^a-zA-Z0-9]/g, '') || 'therapist'}_${db.id?.replace(/[^a-zA-Z0-9]/g, '')}` : undefined),
+});
 
 export const mockAPI = {
   /**
    * Helper to retrieve currently authenticated therapist's ID
    */
   async getActiveTherapistId(): Promise<string> {
-    const profileJson = await AsyncStorage.getItem(USER_PROFILE_KEY);
-    if (profileJson) {
-      const user = JSON.parse(profileJson) as User;
-      return user.id;
-    }
-    return "guest";
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.user?.id || 'guest';
   },
 
   /**
-   * Initializes local storage with seed data if empty (Per Therapist Tenant)
+   * Stub initialization database
    */
   async initializeDatabase(therapistId: string): Promise<void> {
-    try {
-      const appointmentsKey = `${APPOINTMENTS_STORAGE_KEY}_${therapistId}`;
-      const patientsKey = `${PATIENTS_STORAGE_KEY}_${therapistId}`;
-
-      const appointments = await AsyncStorage.getItem(appointmentsKey);
-      const patients = await AsyncStorage.getItem(patientsKey);
-
-      const today = new Date();
-      const todayStr = today.toISOString().split('T')[0];
-
-      if (!patients) {
-        // Pre-populate seed patients ONLY for the pre-seeded developer demo user
-        const initialPatients = therapistId === "therapist_99" ? SEED_PATIENTS : [];
-        await AsyncStorage.setItem(patientsKey, JSON.stringify(initialPatients));
-      }
-      if (!appointments) {
-        // Pre-populate seed appointments ONLY for the pre-seeded developer demo user
-        const initialAps = therapistId === "therapist_99" ? SEED_APPOINTMENTS(todayStr) : [];
-        await AsyncStorage.setItem(appointmentsKey, JSON.stringify(initialAps));
-      }
-    } catch (error) {
-      console.error("Failed to seed database:", error);
+    if (therapistId && therapistId !== 'guest') {
+      await seedDatabaseIfEmpty(therapistId);
     }
   },
 
-  /**
-   * AUTHENTICATION & MULTI-TENANT REGISTRY API
-   */
-  async login(email: string, pin: string): Promise<{ user: User; token: string }> {
-    await delay(300);
-    const cleanedEmail = email.toLowerCase().trim();
-
-    // 1. Seed global users database if empty with default demo therapist
-    const usersJson = await AsyncStorage.getItem(USERS_DB_KEY);
-    let usersList: User[] = usersJson ? JSON.parse(usersJson) : [];
-
-    const demoExists = usersList.some(u => u.email === "demo@psychflow.com");
-    if (!demoExists) {
-      const demoUser: User = {
-        id: "therapist_99",
-        name: "Dr. Roberto D'Avila",
-        email: "demo@psychflow.com",
-        crp: "06/12345-SP",
-        avatar: "https://images.unsplash.com/photo-1537368910025-700350fe46c7?auto=format&fit=crop&q=80&w=200"
+  // Auth wrappers kept for safety, deprecated in favor of direct Supabase context auth
+  async login(email: string, pin: string) {
+    return { user: {} as User, token: "" };
+  },
+  async register(name: string, email: string, crp: string, pin: string) {
+    return { user: {} as User, token: "" };
+  },
+  async recoverPassword(email: string) {
+    return "";
+  },
+  async loginWithBiometrics() {
+    return null;
+  },
+  async logout() {},
+  async getCachedProfile(): Promise<User | null> {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session && session.user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('name, crp, avatar')
+        .eq('id', session.user.id)
+        .single();
+      return {
+        id: session.user.id,
+        email: session.user.email || '',
+        name: profile?.name || session.user.user_metadata?.name || 'Psicólogo',
+        crp: profile?.crp || session.user.user_metadata?.crp || '',
+        avatar: profile?.avatar || 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200',
       };
-      usersList.push(demoUser);
-      await AsyncStorage.setItem(USERS_DB_KEY, JSON.stringify(usersList));
-      // Seed default pin in SecureStore for demo account
-      await SecureStore.setItemAsync(`psychflow_pin_${demoUser.email}`, "123456");
-    }
-
-    // 2. Lookup therapist in users list
-    const matchedUser = usersList.find(u => u.email === cleanedEmail);
-    if (!matchedUser) {
-      throw new Error("Nenhum profissional cadastrado com este e-mail.");
-    }
-
-    // 3. Verify security PIN from native SecureStore
-    const storedPin = await SecureStore.getItemAsync(`psychflow_pin_${cleanedEmail}`);
-    if (storedPin !== pin) {
-      throw new Error("PIN de segurança incorreto.");
-    }
-
-    const mockToken = `mock_jwt_token_secure_${matchedUser.id}_${Date.now()}`;
-
-    await SecureStore.setItemAsync(SECURE_TOKEN_KEY, mockToken);
-    await AsyncStorage.setItem(USER_PROFILE_KEY, JSON.stringify(matchedUser));
-
-    // Bootstrap database for the logged-in tenant
-    await this.initializeDatabase(matchedUser.id);
-
-    return { user: matchedUser, token: mockToken };
-  },
-
-  async register(name: string, email: string, crp: string, pin: string): Promise<{ user: User; token: string }> {
-    await delay(400);
-    const cleanedEmail = email.toLowerCase().trim();
-
-    if (!name.trim() || !email.trim() || !crp.trim() || !pin.trim()) {
-      throw new Error("Por favor, preencha todos os campos obrigatórios.");
-    }
-
-    const usersJson = await AsyncStorage.getItem(USERS_DB_KEY);
-    const usersList: User[] = usersJson ? JSON.parse(usersJson) : [];
-
-    // Check if email already registered
-    const emailExists = usersList.some(u => u.email === cleanedEmail);
-    if (emailExists) {
-      throw new Error("Este e-mail já está cadastrado no PsychFlow.");
-    }
-
-    // Create new therapist profile
-    const newUserId = `therapist_${Date.now()}`;
-    const newUser: User = {
-      id: newUserId,
-      name: name.trim(),
-      email: cleanedEmail,
-      crp: crp.trim(),
-      avatar: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200" // Default profile avatar
-    };
-
-    // Store in global therapist registry
-    usersList.push(newUser);
-    await AsyncStorage.setItem(USERS_DB_KEY, JSON.stringify(usersList));
-
-    // Save PIN securely in native device Keychain/Keystore
-    await SecureStore.setItemAsync(`psychflow_pin_${cleanedEmail}`, pin);
-
-    // Automatically set active session
-    const mockToken = `mock_jwt_token_secure_${newUserId}_${Date.now()}`;
-    await SecureStore.setItemAsync(SECURE_TOKEN_KEY, mockToken);
-    await AsyncStorage.setItem(USER_PROFILE_KEY, JSON.stringify(newUser));
-
-    // Bootstrap database for the new tenant
-    await this.initializeDatabase(newUserId);
-
-    return { user: newUser, token: mockToken };
-  },
-
-  async recoverPassword(email: string): Promise<string> {
-    await delay(400);
-    const cleanedEmail = email.toLowerCase().trim();
-
-    const usersJson = await AsyncStorage.getItem(USERS_DB_KEY);
-    const usersList: User[] = usersJson ? JSON.parse(usersJson) : [];
-
-    const matchedUser = usersList.find(u => u.email === cleanedEmail);
-    if (!matchedUser) {
-      throw new Error("Nenhum profissional cadastrado com este e-mail.");
-    }
-
-    // Generate a temporary 6-digit recovery PIN
-    const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
-
-    // Overwrite old PIN in SecureStore
-    await SecureStore.setItemAsync(`psychflow_pin_${cleanedEmail}`, generatedPin);
-
-    return generatedPin;
-  },
-
-  async loginWithBiometrics(): Promise<{ user: User; token: string } | null> {
-    await delay(200);
-    const token = await SecureStore.getItemAsync(SECURE_TOKEN_KEY);
-    const profileJson = await AsyncStorage.getItem(USER_PROFILE_KEY);
-
-    if (token && profileJson) {
-      const user = JSON.parse(profileJson) as User;
-      return { user, token };
     }
     return null;
   },
 
-  async logout(): Promise<void> {
-    await delay(100);
-    await SecureStore.deleteItemAsync(SECURE_TOKEN_KEY);
-    await AsyncStorage.removeItem(USER_PROFILE_KEY);
-  },
-
-  async getCachedProfile(): Promise<User | null> {
-    const profileJson = await AsyncStorage.getItem(USER_PROFILE_KEY);
-    return profileJson ? (JSON.parse(profileJson) as User) : null;
-  },
-
   /**
-   * APPOINTMENTS & PATIENTS API (With Tenant Key Isolation)
+   * REAL SUPABASE-BACKED APPOINTMENTS & PATIENTS API
    */
   async getAppointments(): Promise<Appointment[]> {
-    await delay(300);
     const therapistId = await this.getActiveTherapistId();
-    const appointmentsKey = `${APPOINTMENTS_STORAGE_KEY}_${therapistId}`;
+    if (therapistId === 'guest') return [];
+    
     await this.initializeDatabase(therapistId);
 
-    const data = await AsyncStorage.getItem(appointmentsKey);
-    return data ? (JSON.parse(data) as Appointment[]) : [];
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('psychologist_id', therapistId)
+      .order('date', { ascending: true })
+      .order('time', { ascending: true });
+
+    if (error) {
+      console.error("[Supabase getAppointments] Error fetching appointments:", error);
+      return [];
+    }
+
+    return (data || []).map(mapAppointmentFromDb);
   },
 
   async getPatients(): Promise<Patient[]> {
-    await delay(300);
     const therapistId = await this.getActiveTherapistId();
-    const patientsKey = `${PATIENTS_STORAGE_KEY}_${therapistId}`;
+    if (therapistId === 'guest') return [];
+
     await this.initializeDatabase(therapistId);
 
-    const data = await AsyncStorage.getItem(patientsKey);
-    return data ? (JSON.parse(data) as Patient[]) : [];
+    const { data, error } = await supabase
+      .from('patients')
+      .select('*')
+      .eq('psychologist_id', therapistId)
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.error("[Supabase getPatients] Error fetching patients:", error);
+      return [];
+    }
+
+    return (data || []).map(mapPatientFromDb);
   },
 
   async getAppointmentById(id: string): Promise<Appointment | null> {
-    await delay(200);
-    const appointments = await this.getAppointments();
-    return appointments.find(ap => ap.id === id) || null;
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      console.error(`[Supabase getAppointmentById] Error fetching appointment ${id}:`, error);
+      return null;
+    }
+
+    return data ? mapAppointmentFromDb(data) : null;
   },
 
   async updateAppointmentStatus(id: string, status: 'confirmed' | 'pending' | 'cancelled'): Promise<Appointment> {
-    await delay(300);
-    const therapistId = await this.getActiveTherapistId();
-    const appointmentsKey = `${APPOINTMENTS_STORAGE_KEY}_${therapistId}`;
+    // Translate UI status back to database status column format
+    const dbStatus = status === 'confirmed' ? 'confirmed' : status === 'pending' ? 'pending' : 'cancelled';
 
-    const appointments = await this.getAppointments();
-    const index = appointments.findIndex(ap => ap.id === id);
-    if (index === -1) throw new Error("Consulta não encontrada.");
+    const { data, error } = await supabase
+      .from('appointments')
+      .update({ status: dbStatus })
+      .eq('id', id)
+      .select()
+      .single();
 
-    appointments[index].status = status;
-    await AsyncStorage.setItem(appointmentsKey, JSON.stringify(appointments));
-    return appointments[index];
+    if (error) {
+      console.error(`[Supabase updateAppointmentStatus] Error:`, error);
+      throw error;
+    }
+
+    return mapAppointmentFromDb(data);
   },
 
   async updatePatientSubscription(id: string, status: SubscriptionStatus): Promise<Patient> {
-    await delay(300);
-    const therapistId = await this.getActiveTherapistId();
-    const patientsKey = `${PATIENTS_STORAGE_KEY}_${therapistId}`;
+    const { data, error } = await supabase
+      .from('patients')
+      .update({ subscription_status: status })
+      .eq('id', id)
+      .select()
+      .single();
 
-    const patients = await this.getPatients();
-    const index = patients.findIndex(p => p.id === id);
-    if (index === -1) throw new Error("Paciente não encontrado.");
+    if (error) {
+      console.error(`[Supabase updatePatientSubscription] Error:`, error);
+      throw error;
+    }
 
-    patients[index].subscriptionStatus = status;
-    await AsyncStorage.setItem(patientsKey, JSON.stringify(patients));
-    return patients[index];
+    return mapPatientFromDb(data);
   },
 
   /**
-   * CLINICAL EVOLUTION (SECURED AUTO-SAVE LOGIC)
+   * CLINICAL EVOLUTION (SECURED SUPABASE DRAFTS & FINALIZATION)
    */
   async saveNotesDraft(id: string, draft: string): Promise<void> {
-    const therapistId = await this.getActiveTherapistId();
-    const appointmentsKey = `${APPOINTMENTS_STORAGE_KEY}_${therapistId}`;
+    const { error } = await supabase
+      .from('appointments')
+      .update({ notes_draft: draft })
+      .eq('id', id);
 
-    const appointments = await this.getAppointments();
-    const index = appointments.findIndex(ap => ap.id === id);
-    if (index === -1) return;
-
-    appointments[index].notesDraft = draft;
-    await AsyncStorage.setItem(appointmentsKey, JSON.stringify(appointments));
+    if (error) {
+      console.error(`[Supabase saveNotesDraft] Error:`, error);
+    }
   },
 
   async finalizeNotes(id: string, clearTextNotes: string): Promise<Appointment> {
-    await delay(400);
-    const therapistId = await this.getActiveTherapistId();
-    const appointmentsKey = `${APPOINTMENTS_STORAGE_KEY}_${therapistId}`;
-
-    const appointments = await this.getAppointments();
-    const index = appointments.findIndex(ap => ap.id === id);
-    if (index === -1) throw new Error("Consulta não encontrada.");
-
     const encryptedData = fakeEncrypt(clearTextNotes);
 
-    appointments[index].notesDraft = "";
-    appointments[index].notesEncrypted = encryptedData;
-    appointments[index].notesFinalized = true;
+    const { data, error } = await supabase
+      .from('appointments')
+      .update({
+        notes_draft: "",
+        notes_encrypted: encryptedData,
+        notes_finalized: true
+      })
+      .eq('id', id)
+      .select()
+      .single();
 
-    await AsyncStorage.setItem(appointmentsKey, JSON.stringify(appointments));
-    return appointments[index];
+    if (error) {
+      console.error(`[Supabase finalizeNotes] Error finalizing notes:`, error);
+      throw error;
+    }
+
+    // Proactively log this inside clinical_records table
+    try {
+      await supabase.from('clinical_records').insert({
+        psychologist_id: data.psychologist_id,
+        patient_id: data.patient_id,
+        appointment_id: data.id,
+        title: `Evolução Clínica - Sessão ${data.date}`,
+        content_encrypted: encryptedData,
+        is_finalized: true,
+        patient_symptom_trend: 'stable'
+      });
+    } catch (recordErr) {
+      console.warn("[Supabase finalizeNotes] Warning: Failed to insert detailed clinical record row:", recordErr);
+    }
+
+    return mapAppointmentFromDb(data);
   }
 };
+

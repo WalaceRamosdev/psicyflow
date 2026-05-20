@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Alert } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, Alert, Linking } from 'react-native';
 
 interface VideoRoomProps {
   patientName: string;
   patientAvatar: string;
+  roomUrl?: string;
   onHangUp: () => void;
   onOpenNotes: () => void;
 }
@@ -11,6 +12,7 @@ interface VideoRoomProps {
 export const VideoRoom: React.FC<VideoRoomProps> = ({
   patientName,
   patientAvatar,
+  roomUrl,
   onHangUp,
   onOpenNotes,
 }) => {
@@ -41,6 +43,18 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
     setIsCamOff(!isCamOff);
   };
 
+  const handleJoinRealCall = async () => {
+    if (roomUrl) {
+      try {
+        await Linking.openURL(roomUrl);
+      } catch (err) {
+        Alert.alert("Erro", "Não foi possível abrir o link da teleconsulta.");
+      }
+    } else {
+      Alert.alert("Aviso", "Link de teleconsulta não localizado.");
+    }
+  };
+
   return (
     <View style={styles.container}>
       {/* Patient Video Feed (Main Window) */}
@@ -68,6 +82,16 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
         <View style={styles.timerBadge}>
           <Text style={styles.timerText}>{formatTime(secondsElapsed)}</Text>
         </View>
+
+        {/* Real Call Button in Center */}
+        <TouchableOpacity
+          style={styles.centerCallButton}
+          onPress={handleJoinRealCall}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.centerCallButtonIcon}>📹</Text>
+          <Text style={styles.centerCallButtonText}>Iniciar Teleconsulta Real (Jitsi)</Text>
+        </TouchableOpacity>
 
         {/* Local Video Feed - PIP (Picture-In-Picture) */}
         <View style={styles.pipContainer}>
@@ -299,5 +323,32 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontSize: 11,
     fontWeight: '600',
+  },
+  centerCallButton: {
+    position: 'absolute',
+    alignSelf: 'center',
+    top: '40%',
+    backgroundColor: '#0D9488',
+    paddingVertical: 14,
+    paddingHorizontal: 22,
+    borderRadius: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    shadowColor: '#0D9488',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  centerCallButtonIcon: {
+    fontSize: 16,
+    marginRight: 8,
+  },
+  centerCallButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: 'bold',
   },
 });

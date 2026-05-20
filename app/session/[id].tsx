@@ -79,6 +79,7 @@ export default function SessionScreen() {
           <VideoRoom
             patientName={appointment.patientName}
             patientAvatar={appointment.patientAvatar}
+            roomUrl={appointment.roomUrl}
             onHangUp={handleHangUp}
             onOpenNotes={handleOpenNotes}
           />

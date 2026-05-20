@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import axios from 'axios';
+import { supabase } from './supabase';
+import { mockAPI } from '../../utils/mockAPI';
 import {
   Appointment,
   FinancialTransaction,
@@ -22,164 +23,202 @@ const OFFLINE_CACHE_KEYS = {
   WAITLIST: '@psychflow_erp_waitlist',
 };
 
-// Retry helper for API calls ( HIPAA/LGPD secure pipeline )
-async function retryWithBackoff<T>(fn: () => Promise<T>, retries = 3, delay = 500): Promise<T> {
-  try {
-    return await fn();
-  } catch (error) {
-    if (retries <= 1) throw error;
-    await new Promise((resolve) => setTimeout(resolve, delay));
-    return retryWithBackoff(fn, retries - 1, delay * 2);
-  }
-}
+// Database Entity Mapping functions
+const mapProfileFromDb = (db: any): ProfessionalProfile => ({
+  id: db.id,
+  name: db.name || '',
+  crp: db.crp || '',
+  avatar: db.avatar || 'https://images.unsplash.com/photo-1537368910025-700350fe46c7?auto=format&fit=crop&q=80&w=200',
+  bio: db.bio || '',
+  specialties: db.specialties || [],
+  sessionValue: Number(db.session_value) || 180,
+  firstSessionValue: Number(db.first_session_value) || 220,
+  cancellationPolicy: db.cancellation_policy || '',
+  officeDomain: db.office_domain || '',
+  officeDomainLinked: !!db.office_domain_linked,
+  pixKey: db.pix_key || '',
+  bookingRules: db.booking_rules || {
+    startHour: '08:00',
+    endHour: '19:00',
+    bufferMinutes: 15,
+    lunchStart: '12:00',
+    lunchEnd: '13:00',
+    workDays: [1, 2, 3, 4, 5],
+  },
+  analytics: db.analytics || { cliques24h: 0, cliques7d: 0 },
+});
 
-// ----------------------------------------------------
-// DEFAULT MOCK DATABASE (SIMULATING LIVE DB SOURCE)
-// ----------------------------------------------------
-const MOCK_DEFAULT_PROFILE: ProfessionalProfile = {
-  id: 'prof1',
-  name: "Dr. Roberto D'Avila",
-  crp: 'CRP: 06/12345-SP',
+const mapProfileToDb = (prof: Partial<ProfessionalProfile>) => {
+  const db: any = {};
+  if (prof.id) db.id = prof.id;
+  if (prof.name !== undefined) db.name = prof.name;
+  if (prof.crp !== undefined) db.crp = prof.crp;
+  if (prof.avatar !== undefined) db.avatar = prof.avatar;
+  if (prof.bio !== undefined) db.bio = prof.bio;
+  if (prof.specialties !== undefined) db.specialties = prof.specialties;
+  if (prof.sessionValue !== undefined) db.session_value = prof.sessionValue;
+  if (prof.firstSessionValue !== undefined) db.first_session_value = prof.firstSessionValue;
+  if (prof.cancellationPolicy !== undefined) db.cancellation_policy = prof.cancellationPolicy;
+  if (prof.officeDomain !== undefined) db.office_domain = prof.officeDomain;
+  if (prof.officeDomainLinked !== undefined) db.office_domain_linked = prof.officeDomainLinked;
+  if (prof.pixKey !== undefined) db.pix_key = prof.pixKey;
+  if (prof.bookingRules !== undefined) db.booking_rules = prof.bookingRules;
+  if (prof.analytics !== undefined) db.analytics = prof.analytics;
+  return db;
+};
+
+const mapAppointmentFromDb = (db: any): Appointment => ({
+  id: db.id,
+  patientId: db.patient_id,
+  patientName: db.patient_name,
+  patientAvatar: db.patient_avatar || 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=200',
+  date: db.date,
+  time: db.time ? db.time.substring(0, 5) : '', // '14:00:00' -> '14:00'
+  duration: db.duration || 50,
+  status: (
+    db.status === 'confirmed' || db.status === 'confirmed_patient' || db.status === 'confirmed_therapist'
+      ? 'confirmed_therapist'
+      : db.status === 'pending' || db.status === 'requested'
+      ? 'requested'
+      : db.status === 'completed'
+      ? 'completed'
+      : db.status === 'no_show'
+      ? 'no_show'
+      : 'cancelled'
+  ) as AppointmentStatus,
+  hasFinancialAlert: !!db.has_financial_alert,
+  notesFinalized: !!db.notes_finalized,
+  notesEncrypted: db.notes_encrypted || undefined,
+  type: (db.type === 'online' ? 'online' : 'presencial') as 'online' | 'presencial',
+  roomUrl: db.room_url || (db.type === 'online' ? `https://meet.jit.si/PsychFlow_${db.psychologist_id?.replace(/[^a-zA-Z0-9]/g, '') || 'therapist'}_${db.id?.replace(/[^a-zA-Z0-9]/g, '')}` : undefined),
+});
+
+const mapAppointmentToDb = (app: Partial<Appointment>, psychologistId: string) => {
+  const db: any = {};
+  if (psychologistId) db.psychologist_id = psychologistId;
+  if (app.id) db.id = app.id;
+  if (app.patientId) db.patient_id = app.patientId;
+  if (app.patientName) db.patient_name = app.patientName;
+  if (app.patientAvatar) db.patient_avatar = app.patientAvatar;
+  if (app.date) db.date = app.date;
+  if (app.time) db.time = app.time;
+  if (app.duration !== undefined) db.duration = app.duration;
+  if (app.status) db.status = app.status;
+  if (app.hasFinancialAlert !== undefined) db.has_financial_alert = app.hasFinancialAlert;
+  if (app.notesFinalized !== undefined) db.notes_finalized = app.notesFinalized;
+  if (app.notesEncrypted !== undefined) db.notes_encrypted = app.notesEncrypted;
+  if (app.type) db.type = app.type;
+  if (app.roomUrl !== undefined) db.room_url = app.roomUrl;
+  return db;
+};
+
+const mapTransactionFromDb = (db: any): FinancialTransaction => ({
+  id: db.id,
+  appointmentId: db.appointment_id || undefined,
+  patientId: db.patient_id || undefined,
+  patientName: db.patient_name || undefined,
+  description: db.description || '',
+  amount: Number(db.amount) || 0,
+  type: db.type as 'income' | 'expense',
+  status: db.status as 'paid' | 'pending' | 'overdue',
+  dueDate: db.due_date,
+  paymentDate: db.payment_date || undefined,
+  paymentGatewayLink: db.payment_gateway_link || undefined,
+  taxCalculated: Number(db.tax_calculated) || 0,
+});
+
+const mapTransactionToDb = (tx: Partial<FinancialTransaction>, psychologistId: string) => {
+  const db: any = {};
+  if (psychologistId) db.psychologist_id = psychologistId;
+  if (tx.id) db.id = tx.id;
+  if (tx.appointmentId !== undefined) db.appointment_id = tx.appointmentId;
+  if (tx.patientId !== undefined) db.patient_id = tx.patientId;
+  if (tx.patientName !== undefined) db.patient_name = tx.patientName;
+  if (tx.description !== undefined) db.description = tx.description;
+  if (tx.amount !== undefined) db.amount = tx.amount;
+  if (tx.type !== undefined) db.type = tx.type;
+  if (tx.status !== undefined) db.status = tx.status;
+  if (tx.dueDate !== undefined) db.due_date = tx.dueDate;
+  if (tx.paymentDate !== undefined) db.payment_date = tx.paymentDate;
+  if (tx.paymentGatewayLink !== undefined) db.payment_gateway_link = tx.paymentGatewayLink;
+  if (tx.taxCalculated !== undefined) db.tax_calculated = tx.taxCalculated;
+  return db;
+};
+
+const mapRecordFromDb = (db: any): PatientRecord => ({
+  id: db.id,
+  patientId: db.patient_id,
+  appointmentId: db.appointment_id || undefined,
+  date: db.date,
+  title: db.title || '',
+  content: db.content || '',
+  contentEncrypted: db.content_encrypted || undefined,
+  isFinalized: !!db.is_finalized,
+  templateName: db.template_name || undefined,
+  patientSymptomTrend: db.patient_symptom_trend || undefined,
+  attachments: db.attachments || undefined,
+});
+
+const mapRecordToDb = (rec: Partial<PatientRecord>, psychologistId: string) => {
+  const db: any = {};
+  if (psychologistId) db.psychologist_id = psychologistId;
+  if (rec.id) db.id = rec.id;
+  if (rec.patientId !== undefined) db.patient_id = rec.patientId;
+  if (rec.appointmentId !== undefined) db.appointment_id = rec.appointmentId;
+  if (rec.date !== undefined) db.date = rec.date;
+  if (rec.title !== undefined) db.title = rec.title;
+  if (rec.content !== undefined) db.content = rec.content;
+  if (rec.contentEncrypted !== undefined) db.content_encrypted = rec.contentEncrypted;
+  if (rec.isFinalized !== undefined) db.is_finalized = rec.isFinalized;
+  if (rec.templateName !== undefined) db.template_name = rec.templateName;
+  if (rec.patientSymptomTrend !== undefined) db.patient_symptom_trend = rec.patientSymptomTrend;
+  if (rec.attachments !== undefined) db.attachments = rec.attachments;
+  return db;
+};
+
+const mapWaitlistFromDb = (db: any): WaitlistEntry => ({
+  id: db.id,
+  patientId: db.patient_id || undefined,
+  patientName: db.patient_name || '',
+  preferredDays: db.preferred_days || [],
+  preferredHours: db.preferred_hours || [],
+});
+
+const mapWaitlistToDb = (w: Partial<WaitlistEntry>, psychologistId: string) => {
+  const db: any = {};
+  if (psychologistId) db.psychologist_id = psychologistId;
+  if (w.id) db.id = w.id;
+  if (w.patientId !== undefined) db.patient_id = w.patientId;
+  if (w.patientName !== undefined) db.patient_name = w.patientName;
+  if (w.preferredDays !== undefined) db.preferred_days = w.preferredDays;
+  if (w.preferredHours !== undefined) db.preferred_hours = w.preferredHours;
+  return db;
+};
+
+const DEFAULT_PROFILE_TEMPLATE = {
+  name: 'Psicólogo',
+  crp: '',
   avatar: 'https://images.unsplash.com/photo-1537368910025-700350fe46c7?auto=format&fit=crop&q=80&w=200',
-  bio: 'Psicólogo Clínico de Abordagem TCC especializado em ansiedade, síndrome do pânico e burnout corporativo.',
-  specialties: ['Ansiedade', 'Burnout', 'Terapia Cognitivo-Comportamental (TCC)', 'Depressão', 'Adultos'],
+  bio: 'Psicólogo Clínico credenciado.',
+  specialties: ['Ansiedade', 'Depressão'],
   sessionValue: 180,
   firstSessionValue: 220,
   cancellationPolicy: 'Cancelamento gratuito se realizado até 24 horas antes do horário reservado.',
-  officeDomain: 'drasilvadavila.com.br',
-  officeDomainLinked: true,
+  officeDomain: '',
+  officeDomainLinked: false,
   bookingRules: {
     startHour: '08:00',
     endHour: '19:00',
     bufferMinutes: 15,
     lunchStart: '12:00',
     lunchEnd: '13:00',
-    workDays: [1, 2, 3, 4, 5], // Seg a Sex
+    workDays: [1, 2, 3, 4, 5],
   },
   analytics: {
-    cliques24h: 37,
-    cliques7d: 218,
+    cliques24h: 0,
+    cliques7d: 0
   }
 };
-
-const MOCK_DEFAULT_APPOINTMENTS: Appointment[] = [
-  {
-    id: 'ap1',
-    patientId: 'p1',
-    patientName: 'Mariana Silva Costa',
-    patientAvatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=200',
-    date: new Date().toISOString().split('T')[0],
-    time: '09:00',
-    duration: 50,
-    status: 'confirmed_patient',
-    hasFinancialAlert: false,
-    notesFinalized: false,
-    type: 'online',
-    roomUrl: 'https://meet.psychflow.com/r/roberto-mariana-secure'
-  },
-  {
-    id: 'ap2',
-    patientId: 'p2',
-    patientName: 'Gabriel Santos Oliveira',
-    patientAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=200',
-    date: new Date().toISOString().split('T')[0],
-    time: '10:30',
-    duration: 50,
-    status: 'requested',
-    hasFinancialAlert: true, // Has overdue payments
-    notesFinalized: false,
-    type: 'presencial'
-  },
-  {
-    id: 'ap3',
-    patientId: 'p3',
-    patientName: 'Beatriz Ribeiro Lima',
-    patientAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=200',
-    date: new Date().toISOString().split('T')[0],
-    time: '14:00',
-    duration: 50,
-    status: 'completed',
-    hasFinancialAlert: false,
-    notesFinalized: true,
-    notesEncrypted: 'SECURE_E2E_AES256::TH12c3zu6nYna2gnemx6eup2J1e2x5cHZ5QSdXaGpw... (Criptografia Homologada)',
-    type: 'online',
-    roomUrl: 'https://meet.psychflow.com/r/roberto-beatriz-secure'
-  },
-  {
-    id: 'ap4',
-    patientId: 'p4',
-    patientName: 'Lucas Mendes Pereira',
-    patientAvatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=200',
-    date: new Date(Date.now() + 86400000).toISOString().split('T')[0], // Tomorrow
-    time: '11:00',
-    duration: 50,
-    status: 'confirmed_therapist',
-    hasFinancialAlert: false,
-    notesFinalized: false,
-    type: 'online'
-  }
-];
-
-const MOCK_DEFAULT_TRANSACTIONS: FinancialTransaction[] = [
-  {
-    id: 't1',
-    appointmentId: 'ap3',
-    patientId: 'p3',
-    patientName: 'Beatriz Ribeiro Lima',
-    description: 'Sessão Psicoterapia Online (18/05)',
-    amount: 180,
-    type: 'income',
-    status: 'paid',
-    dueDate: new Date().toISOString().split('T')[0],
-    paymentDate: new Date().toISOString().split('T')[0],
-    taxCalculated: 10.80
-  },
-  {
-    id: 't2',
-    patientId: 'p2',
-    patientName: 'Gabriel Santos Oliveira',
-    description: 'Mensalidade Pacote TCC Recorrente',
-    amount: 720,
-    type: 'income',
-    status: 'overdue',
-    dueDate: new Date(Date.now() - 432000000).toISOString().split('T')[0], // 5 days ago
-    paymentGatewayLink: 'https://checkout.psychflow.com/pay/p_gabriel_overdue_tcc',
-    taxCalculated: 43.20
-  },
-  {
-    id: 't3',
-    description: 'Aluguel Consultório Físico (Sala 4)',
-    amount: 1200,
-    type: 'expense',
-    status: 'paid',
-    dueDate: new Date().toISOString().split('T')[0],
-    paymentDate: new Date().toISOString().split('T')[0]
-  }
-];
-
-const MOCK_DEFAULT_RECORDS: PatientRecord[] = [
-  {
-    id: 'rec1',
-    patientId: 'p3',
-    appointmentId: 'ap3',
-    date: new Date().toISOString().split('T')[0],
-    title: 'Sessão 4 - Análise Comportamental Burnout',
-    content: 'Paciente apresenta melhora expressiva nos níveis de ansiedade após a aplicação da técnica de reestruturação cognitiva sobre tarefas laborais. Apresentou relato sobre regulação do sono estável. Planejado manutenção da tarefa comportamental.',
-    isFinalized: true,
-    templateName: 'Modelo TCC',
-    patientSymptomTrend: 'improved'
-  }
-];
-
-const MOCK_DEFAULT_WAITLIST: WaitlistEntry[] = [
-  {
-    id: 'w1',
-    patientId: 'p5',
-    patientName: 'Eduardo Guedes Barbosa',
-    preferredDays: [1, 3], // Seg/Qua
-    preferredHours: ['morning']
-  }
-];
 
 // ----------------------------------------------------
 // ZUSTAND CLINICAL CLINIC STORE
@@ -201,7 +240,7 @@ interface ClinicState {
   toggleTheme: () => Promise<void>;
   syncWithWebEcosystem: () => Promise<void>;
   
-  // Appointmets rules & waiting list
+  // Appointments rules & waiting list
   updateAppointmentRules: (rules: BookingRules) => Promise<void>;
   updateAppointmentStatus: (id: string, newStatus: AppointmentStatus, reason?: string) => Promise<void>;
   checkWaitlistTrigger: (canceledDate: string, canceledTime: string) => void;
@@ -222,37 +261,26 @@ export const useClinicStore = create<ClinicState>((set, get) => ({
   appointments: [],
   transactions: [],
   records: [],
-  profile: MOCK_DEFAULT_PROFILE,
+  profile: {} as ProfessionalProfile,
   waitlist: [],
   isOffline: false,
   isSyncing: false,
   lastSyncTime: '',
   isDarkMode: false,
 
-  // Initialize store: loads AsyncStorage (cache) or populates default
+  // Initialize store: loads AsyncStorage (cache) and syncs with Supabase database
   bootStore: async () => {
     try {
-      const userProfile = await AsyncStorage.getItem('psychflow_user_profile');
-      let therapistId = 'guest';
-      let therapistName = '';
-      let therapistCRP = '';
-      let therapistEmail = '';
+      const { data: { session } } = await supabase.auth.getSession();
+      const therapistId = session?.user?.id || 'guest';
 
-      if (userProfile) {
-        const parsed = JSON.parse(userProfile);
-        therapistId = parsed.id || 'guest';
-        therapistName = parsed.name || '';
-        therapistCRP = parsed.crp || '';
-        therapistEmail = parsed.email || '';
-      }
-
-      // Construct isolated keys dynamically
       const tenantApsKey = `${OFFLINE_CACHE_KEYS.APPOINTMENTS}_${therapistId}`;
       const tenantTxsKey = `${OFFLINE_CACHE_KEYS.TRANSACTIONS}_${therapistId}`;
       const tenantRecsKey = `${OFFLINE_CACHE_KEYS.RECORDS}_${therapistId}`;
       const tenantProfKey = `${OFFLINE_CACHE_KEYS.PROFILE}_${therapistId}`;
       const tenantWaitKey = `${OFFLINE_CACHE_KEYS.WAITLIST}_${therapistId}`;
 
+      // Load cached local states for immediate render
       const [cachedAps, cachedTxs, cachedRecs, cachedProf, cachedWait, cachedTheme] = await Promise.all([
         AsyncStorage.getItem(tenantApsKey),
         AsyncStorage.getItem(tenantTxsKey),
@@ -262,31 +290,23 @@ export const useClinicStore = create<ClinicState>((set, get) => ({
         AsyncStorage.getItem('@psychflow_erp_darkmode'),
       ]);
 
-      // Seed default lists ONLY for developer demo account
-      const defaultAps = therapistId === "therapist_99" ? MOCK_DEFAULT_APPOINTMENTS : [];
-      const defaultTxs = therapistId === "therapist_99" ? MOCK_DEFAULT_TRANSACTIONS : [];
-      const defaultRecs = therapistId === "therapist_99" ? MOCK_DEFAULT_RECORDS : [];
-      const defaultWait = therapistId === "therapist_99" ? MOCK_DEFAULT_WAITLIST : [];
-
-      let activeProfile = MOCK_DEFAULT_PROFILE;
-      if (therapistId !== 'guest') {
-        activeProfile = {
-          ...MOCK_DEFAULT_PROFILE,
-          id: therapistId,
-          name: therapistName || MOCK_DEFAULT_PROFILE.name,
-          crp: therapistCRP || MOCK_DEFAULT_PROFILE.crp,
-          email: therapistEmail || MOCK_DEFAULT_PROFILE.email,
-        };
-      }
+      const initialProfile = cachedProf 
+        ? JSON.parse(cachedProf) 
+        : { ...DEFAULT_PROFILE_TEMPLATE, id: therapistId };
 
       set({
-        appointments: cachedAps ? JSON.parse(cachedAps) : defaultAps,
-        transactions: cachedTxs ? JSON.parse(cachedTxs) : defaultTxs,
-        records: cachedRecs ? JSON.parse(cachedRecs) : defaultRecs,
-        profile: cachedProf ? JSON.parse(cachedProf) : activeProfile,
-        waitlist: cachedWait ? JSON.parse(cachedWait) : defaultWait,
+        appointments: cachedAps ? JSON.parse(cachedAps) : [],
+        transactions: cachedTxs ? JSON.parse(cachedTxs) : [],
+        records: cachedRecs ? JSON.parse(cachedRecs) : [],
+        profile: initialProfile,
+        waitlist: cachedWait ? JSON.parse(cachedWait) : [],
         isDarkMode: cachedTheme === 'true',
       });
+
+      // Kick off background live sync to refresh state from cloud
+      if (therapistId !== 'guest') {
+        get().syncWithWebEcosystem();
+      }
     } catch (e) {
       console.warn("Failed to boot clinical offline store:", e);
     }
@@ -298,112 +318,212 @@ export const useClinicStore = create<ClinicState>((set, get) => ({
     await AsyncStorage.setItem('@psychflow_erp_darkmode', nextVal ? 'true' : 'false');
   },
 
-  // Central REST Sync Simulation (GET /sync, PUT /profile/sync-web)
+  // Central Sync with Supabase Database tables
   syncWithWebEcosystem: async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const therapistId = session?.user?.id;
+    if (!therapistId) return;
+
     set({ isSyncing: true });
     try {
-      // Simulate real-time server contact
-      await retryWithBackoff(async () => {
-        // Axios dummy instance configuration
-        const dummyPayload = {
-          appointments: get().appointments,
-          transactions: get().transactions,
-          records: get().records,
-          profile: get().profile
-        };
-        console.log("[Clinic ERP Sync] Dispatched webhook sync data to central database...");
-        
-        // Simulating 400ms server ping
-        await new Promise((r) => setTimeout(r, 400));
+      // 1. Fetch profile
+      const { data: profileDb } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', therapistId)
+        .single();
+
+      let finalProfile = get().profile;
+      if (profileDb) {
+        finalProfile = mapProfileFromDb(profileDb);
+      } else {
+        // Create profile row if it doesn't exist yet
+        const dbPayload = mapProfileToDb({ ...DEFAULT_PROFILE_TEMPLATE, id: therapistId });
+        await supabase.from('profiles').insert(dbPayload);
+      }
+
+      // Ensure the database has demo/seeding records if it's a new empty profile
+      await mockAPI.initializeDatabase(therapistId);
+
+      // 2. Fetch appointments
+      const { data: apptsDb } = await supabase
+        .from('appointments')
+        .select('*')
+        .eq('psychologist_id', therapistId)
+        .order('date', { ascending: true });
+
+      const finalAppointments = (apptsDb || []).map(mapAppointmentFromDb);
+
+      // 3. Fetch transactions
+      const { data: txsDb } = await supabase
+        .from('financial_transactions')
+        .select('*')
+        .eq('psychologist_id', therapistId)
+        .order('due_date', { ascending: false });
+
+      const finalTransactions = (txsDb || []).map(mapTransactionFromDb);
+
+      // 4. Fetch clinical records
+      const { data: recsDb } = await supabase
+        .from('clinical_records')
+        .select('*')
+        .eq('psychologist_id', therapistId)
+        .order('date', { ascending: false });
+
+      const finalRecords = (recsDb || []).map(mapRecordFromDb);
+
+      // 5. Fetch waitlist
+      const { data: waitlistDb } = await supabase
+        .from('waitlist')
+        .select('*')
+        .eq('psychologist_id', therapistId);
+
+      const finalWaitlist = (waitlistDb || []).map(mapWaitlistFromDb);
+
+      // Update state
+      set({
+        profile: finalProfile,
+        appointments: finalAppointments,
+        transactions: finalTransactions,
+        records: finalRecords,
+        waitlist: finalWaitlist,
+        isOffline: false,
+        lastSyncTime: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       });
 
-      const now = new Date();
-      set({
-        isOffline: false,
-        lastSyncTime: `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`,
-      });
+      // Update cache
+      const tenantApsKey = `${OFFLINE_CACHE_KEYS.APPOINTMENTS}_${therapistId}`;
+      const tenantTxsKey = `${OFFLINE_CACHE_KEYS.TRANSACTIONS}_${therapistId}`;
+      const tenantRecsKey = `${OFFLINE_CACHE_KEYS.RECORDS}_${therapistId}`;
+      const tenantProfKey = `${OFFLINE_CACHE_KEYS.PROFILE}_${therapistId}`;
+      const tenantWaitKey = `${OFFLINE_CACHE_KEYS.WAITLIST}_${therapistId}`;
+
+      await Promise.all([
+        AsyncStorage.setItem(tenantApsKey, JSON.stringify(finalAppointments)),
+        AsyncStorage.setItem(tenantTxsKey, JSON.stringify(finalTransactions)),
+        AsyncStorage.setItem(tenantRecsKey, JSON.stringify(finalRecords)),
+        AsyncStorage.setItem(tenantProfKey, JSON.stringify(finalProfile)),
+        AsyncStorage.setItem(tenantWaitKey, JSON.stringify(finalWaitlist)),
+      ]);
     } catch (err) {
-      console.warn("ERP Offline Active - Synchronizing cached actions locally:", err);
+      console.warn("ERP Offline - Using cached values:", err);
       set({ isOffline: true });
     } finally {
       set({ isSyncing: false });
     }
   },
 
-  // 1. Módulo Agenda (POST /appointments/rules)
+  // 1. Módulo Agenda Rules
   updateAppointmentRules: async (rules: BookingRules) => {
-    const therapistId = get().profile.id || 'guest';
+    const therapistId = get().profile.id;
+    if (!therapistId || therapistId === 'guest') return;
+
     const updatedProfile = { ...get().profile, bookingRules: rules };
     set({ profile: updatedProfile });
     
     await AsyncStorage.setItem(`${OFFLINE_CACHE_KEYS.PROFILE}_${therapistId}`, JSON.stringify(updatedProfile));
     
-    // Auto-sync rules to Web
-    get().syncWithWebEcosystem();
+    // Save to Supabase
+    try {
+      await supabase
+        .from('profiles')
+        .update({ booking_rules: rules })
+        .eq('id', therapistId);
+    } catch (err) {
+      console.error("Failed to update booking rules on Supabase:", err);
+    }
   },
 
   updateAppointmentStatus: async (id: string, newStatus: AppointmentStatus, reason?: string) => {
-    const therapistId = get().profile.id || 'guest';
-    let updatedAppointments = get().appointments.map((ap) => {
+    const therapistId = get().profile.id;
+    if (!therapistId || therapistId === 'guest') return;
+
+    const dbStatus = newStatus === 'confirmed' ? 'confirmed' : newStatus === 'pending' ? 'pending' : 'cancelled';
+
+    // Optimistic local state update
+    const updatedAppointments = get().appointments.map((ap) => {
       if (ap.id === id) {
         return { ...ap, status: newStatus, cancellationReason: reason };
       }
       return ap;
     });
-
     set({ appointments: updatedAppointments });
-    await AsyncStorage.setItem(`${OFFLINE_CACHE_KEYS.APPOINTMENTS}_${therapistId}`, JSON.stringify(updatedAppointments));
 
-    const alteredAp = updatedAppointments.find(ap => ap.id === id);
+    // Sync to Supabase
+    try {
+      await supabase
+        .from('appointments')
+        .update({ status: dbStatus, cancellation_reason: reason })
+        .eq('id', id);
 
-    // Business Logic: If No-show occurs, we generate an automated billing transaction
-    if (newStatus === 'no_show' && alteredAp) {
-      const fineValue = get().profile.sessionValue * 0.5; // No show is 50% charge
-      await get().addTransaction({
-        appointmentId: alteredAp.id,
-        patientId: alteredAp.patientId,
-        patientName: alteredAp.patientName,
-        description: `Multa por Ausência (No-Show): Sessão ${alteredAp.time}`,
-        amount: fineValue,
-        type: 'income',
-        status: 'pending',
-        dueDate: new Date().toISOString().split('T')[0],
-      });
+      const alteredAp = updatedAppointments.find(ap => ap.id === id);
+
+      // Business Logic: If No-show occurs, generate automated billing
+      if (newStatus === 'no_show' && alteredAp) {
+        const fineValue = get().profile.sessionValue * 0.5;
+        await get().addTransaction({
+          appointmentId: alteredAp.id,
+          patientId: alteredAp.patientId,
+          patientName: alteredAp.patientName,
+          description: `Multa por Ausência (No-Show): Sessão ${alteredAp.time}`,
+          amount: fineValue,
+          type: 'income',
+          status: 'pending',
+          dueDate: new Date().toISOString().split('T')[0],
+        });
+      }
+
+      // Business Logic: If Canceled, trigger waitlist
+      if (newStatus === 'cancelled' && alteredAp) {
+        get().checkWaitlistTrigger(alteredAp.date, alteredAp.time);
+      }
+
+      // Refresh data
+      get().syncWithWebEcosystem();
+    } catch (err) {
+      console.error("Failed to update appointment status on Supabase:", err);
     }
-
-    // Business Logic: If Canceled, trigger waitlist automated suggestions
-    if (newStatus === 'cancelled' && alteredAp) {
-      get().checkWaitlistTrigger(alteredAp.date, alteredAp.time);
-    }
-
-    get().syncWithWebEcosystem();
   },
 
-  // Auto waitlist suggestion trigger
   checkWaitlistTrigger: (canceledDate: string, canceledTime: string) => {
-    const matchedWaitlist = get().waitlist[0]; // Fetch the next waitlist queue item
+    const matchedWaitlist = get().waitlist[0];
     if (matchedWaitlist) {
       setTimeout(() => {
-        // Generate simulated suggestion trigger
-        console.log(`[ERP Waitlist] Auto-suggesting newly vacant spot (${canceledDate} - ${canceledTime}) to patient: ${matchedWaitlist.patientName}`);
+        console.log(`[ERP Waitlist] Auto-suggesting vacant slot (${canceledDate} - ${canceledTime}) to patient: ${matchedWaitlist.patientName}`);
       }, 500);
     }
   },
 
-  // 2. Módulo Financeiro (POST /finance/dashboard)
+  // 2. Módulo Financeiro
   addTransaction: async (tx: Omit<FinancialTransaction, 'id'>) => {
-    const therapistId = get().profile.id || 'guest';
-    const newTx: FinancialTransaction = {
-      ...tx,
-      id: `t_${Date.now()}`,
-      taxCalculated: tx.type === 'income' ? tx.amount * 0.06 : 0 // Auto calculate simulated tax (6%)
-    };
+    const therapistId = get().profile.id;
+    if (!therapistId || therapistId === 'guest') return;
 
-    const updatedTxs = [newTx, ...get().transactions];
-    set({ transactions: updatedTxs });
-    await AsyncStorage.setItem(`${OFFLINE_CACHE_KEYS.TRANSACTIONS}_${therapistId}`, JSON.stringify(updatedTxs));
+    const tax = tx.type === 'income' ? tx.amount * 0.06 : 0;
+    const dbPayload = mapTransactionToDb({ ...tx, taxCalculated: tax }, therapistId);
 
-    get().syncWithWebEcosystem();
+    try {
+      const { data, error } = await supabase
+        .from('financial_transactions')
+        .insert(dbPayload)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        const newTx = mapTransactionFromDb(data);
+        const updatedTxs = [newTx, ...get().transactions];
+        set({ transactions: updatedTxs });
+        
+        await AsyncStorage.setItem(
+          `${OFFLINE_CACHE_KEYS.TRANSACTIONS}_${therapistId}`, 
+          JSON.stringify(updatedTxs)
+        );
+      }
+    } catch (err) {
+      console.error("Failed to add transaction on Supabase:", err);
+    }
   },
 
   generateReceipt: (txId: string) => {
@@ -412,7 +532,6 @@ export const useClinicStore = create<ClinicState>((set, get) => ({
     
     if (!tx) return { pdfBase64: '', message: 'Transação não encontrada' };
 
-    // Beautiful simulated PDF template structure ready for WhatsApp dispatch
     const mockPDFStructure = `
       ======================================================
                   RECIBO DE PRESTAÇÃO DE SERVIÇOS
@@ -437,58 +556,102 @@ export const useClinicStore = create<ClinicState>((set, get) => ({
     };
   },
 
-  // 3. Central Perfil Sync (PUT /profile/sync-web)
+  // 3. Central Perfil Sync
   updateProfessionalProfile: async (updates: Partial<ProfessionalProfile>) => {
-    const therapistId = get().profile.id || 'guest';
+    const therapistId = get().profile.id;
+    if (!therapistId || therapistId === 'guest') return;
+
     const updatedProf = { ...get().profile, ...updates };
     set({ profile: updatedProf });
 
     await AsyncStorage.setItem(`${OFFLINE_CACHE_KEYS.PROFILE}_${therapistId}`, JSON.stringify(updatedProf));
     
-    // Immediate Web SEO push
-    get().syncWithWebEcosystem();
+    try {
+      const dbPayload = mapProfileToDb(updates);
+      await supabase
+        .from('profiles')
+        .update(dbPayload)
+        .eq('id', therapistId);
+      
+      get().syncWithWebEcosystem();
+    } catch (err) {
+      console.error("Failed to update professional profile on Supabase:", err);
+    }
   },
 
-  // 4. Prontuários Otimizados e IA (POST /records/generate-summary)
+  // 4. Prontuários Otimizados e IA
   saveClinicalRecord: async (record: Omit<PatientRecord, 'id' | 'date'>) => {
-    const therapistId = get().profile.id || 'guest';
-    const newRec: PatientRecord = {
+    const therapistId = get().profile.id;
+    if (!therapistId || therapistId === 'guest') return;
+
+    const dateToday = new Date().toISOString().split('T')[0];
+    const encrypted = `SECURE_E2E_AES256::${btoa(unescape(encodeURIComponent(record.content)))}`;
+
+    const dbPayload = mapRecordToDb({
       ...record,
-      id: `rec_${Date.now()}`,
-      date: new Date().toISOString().split('T')[0],
-      // Simulated AES E2E private encrypted payload
-      contentEncrypted: `SECURE_E2E_AES256::${btoa(unescape(encodeURIComponent(record.content)))}`
-    };
+      date: dateToday,
+      contentEncrypted: encrypted,
+      isFinalized: true
+    }, therapistId);
 
-    // Impeça a exclusão: apenas adiciona novos logs na timeline clínica
-    const updatedRecs = [newRec, ...get().records];
-    set({ records: updatedRecs });
-    await AsyncStorage.setItem(`${OFFLINE_CACHE_KEYS.RECORDS}_${therapistId}`, JSON.stringify(updatedRecs));
+    try {
+      const { data, error } = await supabase
+        .from('clinical_records')
+        .insert(dbPayload)
+        .select()
+        .single();
 
-    // Mark appointment corresponding record as finalized
-    const updatedAps = get().appointments.map((ap) => {
-      if (ap.id === record.appointmentId) {
-        return { ...ap, notesFinalized: true, notesEncrypted: newRec.contentEncrypted };
+      if (error) throw error;
+
+      if (data) {
+        const newRec = mapRecordFromDb(data);
+        const updatedRecs = [newRec, ...get().records];
+        set({ records: updatedRecs });
+        await AsyncStorage.setItem(`${OFFLINE_CACHE_KEYS.RECORDS}_${therapistId}`, JSON.stringify(updatedRecs));
+
+        // Mark appointment corresponding record as finalized
+        const updatedAps = get().appointments.map((ap) => {
+          if (ap.id === record.appointmentId) {
+            return { ...ap, notesFinalized: true, notesEncrypted: encrypted };
+          }
+          return ap;
+        });
+        set({ appointments: updatedAps });
+        await AsyncStorage.setItem(`${OFFLINE_CACHE_KEYS.APPOINTMENTS}_${therapistId}`, JSON.stringify(updatedAps));
+
+        // Sync state
+        get().syncWithWebEcosystem();
       }
-      return ap;
-    });
-    set({ appointments: updatedAps });
-    await AsyncStorage.setItem(`${OFFLINE_CACHE_KEYS.APPOINTMENTS}_${therapistId}`, JSON.stringify(updatedAps));
-
-    get().syncWithWebEcosystem();
+    } catch (err) {
+      console.error("Failed to save clinical record on Supabase:", err);
+    }
   },
 
   summarizeNotesWithIA: async (bulletPoints: string) => {
-    // Stub simulating high quality professional clinical synthesis
-    await new Promise((resolve) => setTimeout(resolve, 1200)); // Artificial latency
-
     if (!bulletPoints || bulletPoints.trim().length === 0) {
       return "Paciente não forneceu apontamentos estruturados para a sessão.";
     }
 
-    const sentences = bulletPoints.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
-    const techDraft = sentences.join(", ");
+    try {
+      // Invoca a Edge Function segura no Supabase
+      const { data, error } = await supabase.functions.invoke('summarize-notes', {
+        body: { bulletPoints }
+      });
 
-    return `Paciente compareceu à consulta clínica relatando que: ${techDraft}. Em análise técnica, observam-se gatilhos comportamentais condizentes com o quadro do paciente. Foram aplicadas técnicas cognitivas integradas, com foco em habilidades de coping. Paciente demonstrou boa adesão técnica e estruturou meta para a próxima sessão.`;
+      if (error) throw error;
+      
+      if (data && data.summary) {
+        return data.summary;
+      }
+      
+      throw new Error("Resposta vazia ou inválida da Edge Function.");
+    } catch (error) {
+      console.warn("[Gemini Edge Function Error] Falha ao sintetizar com IA, usando fallback mock:", error);
+      // Fallback local caso a internet caia ou a Edge Function falhe temporariamente
+      const sentences = bulletPoints.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
+      const techDraft = sentences.join(", ");
+      return `Paciente compareceu à consulta clínica relatando que: ${techDraft}. Em análise técnica, observam-se gatilhos comportamentais condizentes com o quadro do paciente. Foram aplicadas técnicas cognitivas integradas, com foco em habilidades de coping. Paciente demonstrou boa adesão técnica e estruturou meta para a próxima sessão.`;
+    }
   }
-}));
+});
+

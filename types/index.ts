@@ -36,6 +36,7 @@ export interface Appointment {
   notesDraft?: string;
   notesEncrypted?: string;
   notesFinalized?: boolean;
+  roomUrl?: string;
 }
 
 export interface Insight {

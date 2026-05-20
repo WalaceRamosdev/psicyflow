@@ -21,6 +21,7 @@ export default function RegisterScreen() {
   const [crp, setCrp] = useState<string>("");
   const [pin, setPin] = useState<string>("");
   const [confirmPin, setConfirmPin] = useState<string>("");
+  const [acceptedTerms, setAcceptedTerms] = useState<boolean>(false);
 
   const [emailError, setEmailError] = useState<string>("");
 
@@ -59,6 +60,11 @@ export default function RegisterScreen() {
 
     if (pin !== confirmPin) {
       Alert.alert("Erro de Confirmação", "Os PINs digitados não são iguais.");
+      return;
+    }
+
+    if (!acceptedTerms) {
+      Alert.alert("Termos e Consentimento", "Você deve aceitar os Termos de Uso e a Política de Privacidade (LGPD) para prosseguir.");
       return;
     }
 
@@ -148,6 +154,20 @@ export default function RegisterScreen() {
               keyboardType="numeric"
               maskType="password"
             />
+
+            {/* LGPD Consent Checkbox */}
+            <TouchableOpacity 
+              style={styles.checkboxContainer} 
+              onPress={() => setAcceptedTerms(!acceptedTerms)}
+              activeOpacity={0.8}
+            >
+              <View style={[styles.checkbox, acceptedTerms && styles.checkboxChecked]}>
+                {acceptedTerms && <Text style={styles.checkmark}>✓</Text>}
+              </View>
+              <Text style={styles.checkboxLabel}>
+                Estou de acordo com os Termos de Uso e a Política de Privacidade do PsychFlow. Declaro consentimento para o tratamento seguro dos meus dados profissionais de acordo com a LGPD.
+              </Text>
+            </TouchableOpacity>
 
             {/* Register button */}
             <TouchableOpacity
@@ -241,6 +261,37 @@ const styles = StyleSheet.create({
     marginTop: -10,
     marginBottom: 10,
     fontWeight: '500',
+  },
+  checkboxContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 12,
+    paddingRight: 10,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#0D9488',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+    backgroundColor: 'transparent',
+  },
+  checkboxChecked: {
+    backgroundColor: '#0D9488',
+  },
+  checkmark: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  checkboxLabel: {
+    color: '#94A3B8',
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 16,
   },
   primaryButton: {
     backgroundColor: '#0D9488',

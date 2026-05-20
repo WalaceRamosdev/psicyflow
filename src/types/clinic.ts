@@ -24,6 +24,7 @@ export interface ProfessionalProfile {
   cancellationPolicy: string; // e.g. "Cancelamento grátis até 24h antes"
   officeDomain?: string;       // e.g. "drasilva.com.br"
   officeDomainLinked: boolean;
+  pixKey?: string;              // Chave PIX do psicólogo para pagamentos
   bookingRules: BookingRules;
   analytics: WebAnalytics;
 }

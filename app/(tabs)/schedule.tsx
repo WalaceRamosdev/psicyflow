@@ -107,12 +107,18 @@ export default function ScheduleScreen() {
   };
 
   const getStatusDetails = (status: AppointmentStatus) => {
+    if (!status) {
+      return { label: 'Agendado', bg: isDarkMode ? '#1E293B' : '#F1F5F9', text: isDarkMode ? '#94A3B8' : '#475569' };
+    }
+
     switch (status) {
       case 'requested':
+      case 'pending' as any:
         return { label: 'Solicitado', bg: isDarkMode ? '#1E293B' : '#F1F5F9', text: isDarkMode ? '#94A3B8' : '#475569' };
       case 'confirmed_patient':
         return { label: 'Confirmado (Pac.)', bg: theme.primaryLight, text: theme.primary };
       case 'confirmed_therapist':
+      case 'confirmed' as any:
         return { label: 'Confirmado (Ter.)', bg: isDarkMode ? 'rgba(59, 130, 246, 0.15)' : '#EFF6FF', text: isDarkMode ? '#60A5FA' : '#2563EB' };
       case 'in_progress':
         return { label: 'Em Andamento', bg: isDarkMode ? 'rgba(217, 119, 6, 0.15)' : '#FEF3C7', text: isDarkMode ? '#F59E0B' : '#D97706' };
@@ -122,6 +128,8 @@ export default function ScheduleScreen() {
         return { label: 'Cancelado', bg: theme.dangerLight, text: theme.danger };
       case 'no_show':
         return { label: 'No-Show', bg: isDarkMode ? '#1E293B' : '#F5F5F4', text: isDarkMode ? '#94A3B8' : '#57534E' };
+      default:
+        return { label: 'Agendado', bg: isDarkMode ? '#1E293B' : '#F1F5F9', text: isDarkMode ? '#94A3B8' : '#475569' };
     }
   };
 
