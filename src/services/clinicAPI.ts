@@ -342,8 +342,7 @@ export const useClinicStore = create<ClinicState>()((set, get) => ({
         await supabase.from('profiles').insert(dbPayload);
       }
 
-      // Ensure the database has demo/seeding records if it's a new empty profile
-      await mockAPI.initializeDatabase(therapistId);
+      // If profile is newly created, the account starts clean (no demo seeding in production)
 
       // 2. Fetch appointments
       const { data: apptsDb } = await supabase
@@ -406,7 +405,7 @@ export const useClinicStore = create<ClinicState>()((set, get) => ({
         AsyncStorage.setItem(tenantWaitKey, JSON.stringify(finalWaitlist)),
       ]);
     } catch (err) {
-      console.warn("ERP Offline - Using cached values:", err);
+      if (__DEV__) console.warn("ERP Offline - Using cached values:", err);
       set({ isOffline: true });
     } finally {
       set({ isSyncing: false });
