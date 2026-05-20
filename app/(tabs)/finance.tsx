@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { Svg, Path, G, Text as SvgText } from 'react-native-svg';
 import {
   View,
   Text,
@@ -9,11 +10,39 @@ import {
   TextInput,
   Modal,
   Alert,
-  Share
+  Share,
+  ScrollView
 } from 'react-native';
 import { useClinicStore } from '../../src/services/clinicAPI';
 import { FinancialTransaction } from '../../src/types/clinic';
 import { themes } from '../../src/styles/theme';
+
+// ---- Donut chart helpers (pure math, no extra library) ----
+function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
+  const rad = ((angleDeg - 90) * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function arcPath(
+  cx: number, cy: number,
+  outerR: number, innerR: number,
+  startAngle: number, endAngle: number
+): string {
+  // Clamp to avoid full-circle degenerate path
+  const end = Math.min(endAngle, startAngle + 359.99);
+  const large = end - startAngle > 180 ? 1 : 0;
+  const os = polarToCartesian(cx, cy, outerR, end);
+  const oe = polarToCartesian(cx, cy, outerR, startAngle);
+  const is = polarToCartesian(cx, cy, innerR, end);
+  const ie = polarToCartesian(cx, cy, innerR, startAngle);
+  return [
+    `M ${os.x} ${os.y}`,
+    `A ${outerR} ${outerR} 0 ${large} 0 ${oe.x} ${oe.y}`,
+    `L ${ie.x} ${ie.y}`,
+    `A ${innerR} ${innerR} 0 ${large} 1 ${is.x} ${is.y}`,
+    'Z',
+  ].join(' ');
+}
 
 export default function FinanceScreen() {
   const transactions = useClinicStore((state) => state.transactions);
@@ -39,16 +68,21 @@ export default function FinanceScreen() {
     let receitaMes = 0; // Confirmed/Paid incomes
     let aReceber = 0;   // Pending incomes
     let inadimplencia = 0; // Overdue/Late incomes
+    let despesasMes = 0;  // Registered expenses
 
     transactions.forEach((tx) => {
       if (tx.type === 'income') {
         if (tx.status === 'paid') receitaMes += tx.amount;
         if (tx.status === 'pending') aReceber += tx.amount;
         if (tx.status === 'overdue') inadimplencia += tx.amount;
+      } else if (tx.type === 'expense') {
+        despesasMes += tx.amount;
       }
     });
 
-    return { receitaMes, aReceber, inadimplencia };
+    const saldoLiquido = receitaMes - despesasMes;
+
+    return { receitaMes, aReceber, inadimplencia, despesasMes, saldoLiquido };
   }, [transactions]);
 
   // Filter transaction list
@@ -131,38 +165,72 @@ export default function FinanceScreen() {
     }
   };
 
+  const getCardStyle = (item: FinancialTransaction) => {
+    const isIncome = item.type === 'income';
+
+    // Base accent color by type
+    const accentColor = isIncome ? '#10B981' : '#EF4444'; // emerald or red
+
+    // Subtle background tint by status
+    let bgTint = theme.card;
+    if (isDarkMode) {
+      if (item.status === 'paid')    bgTint = isIncome ? 'rgba(16, 185, 129, 0.07)' : 'rgba(239, 68, 68, 0.07)';
+      if (item.status === 'pending') bgTint = 'rgba(217, 119, 6, 0.07)';
+      if (item.status === 'overdue') bgTint = 'rgba(239, 68, 68, 0.10)';
+    } else {
+      if (item.status === 'paid')    bgTint = isIncome ? '#F0FDF4' : '#FFF5F5';
+      if (item.status === 'pending') bgTint = '#FFFBEB';
+      if (item.status === 'overdue') bgTint = '#FEF2F2';
+    }
+
+    return { accentColor, bgTint };
+  };
+
   const renderTransactionItem = ({ item }: { item: FinancialTransaction }) => {
     const isIncome = item.type === 'income';
     const statusColor = getStatusColor(item.status);
-    
+    const { accentColor, bgTint } = getCardStyle(item);
+
     return (
-      <TouchableOpacity 
-        style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
+      <TouchableOpacity
+        style={[
+          styles.card,
+          {
+            backgroundColor: bgTint,
+            borderColor: accentColor,
+            borderLeftWidth: 4,
+            borderLeftColor: accentColor,
+          }
+        ]}
         onPress={() => handleReceiptTrigger(item)}
         activeOpacity={0.8}
       >
         <View style={styles.cardHeader}>
-          <View>
-            <Text style={[styles.cardDesc, { color: theme.text }]}>{item.description}</Text>
+          <View style={{ flex: 1, marginRight: 8 }}>
+            <Text style={[styles.cardDesc, { color: theme.text }]} numberOfLines={1}>
+              {isIncome ? '📥 ' : '📤 '}{item.description}
+            </Text>
             <Text style={[styles.cardSub, { color: theme.textSec }]}>
-              Vencimento: {item.dueDate} {item.patientName ? `| ${item.patientName}` : ''}
+              Vencimento: {item.dueDate}{item.patientName ? ` | Paciente: ${item.patientName}` : ''}
             </Text>
           </View>
-          
-          <Text style={[styles.cardAmount, { color: isIncome ? theme.success : theme.danger }]}>
-            {isIncome ? '+' : '-'} R$ {item.amount.toFixed(2)}
-          </Text>
+
+          <View style={[styles.amountBadge, { backgroundColor: isIncome ? (isDarkMode ? 'rgba(16,185,129,0.15)' : '#DCFCE7') : (isDarkMode ? 'rgba(239,68,68,0.15)' : '#FEE2E2') }]}>
+            <Text style={[styles.cardAmount, { color: isIncome ? theme.success : theme.danger }]}>
+              {isIncome ? '+' : '-'} R$ {item.amount.toFixed(2)}
+            </Text>
+          </View>
         </View>
 
         <View style={[styles.cardFooter, { borderTopColor: theme.divider }]}>
           <View style={styles.statusRow}>
             <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
             <Text style={[styles.statusLabel, { color: statusColor }]}>
-              {item.status === 'paid' ? 'Pago' : item.status === 'pending' ? 'Pendente' : 'Atrasado'}
+              {item.status === 'paid' ? 'Recebido/Pago' : item.status === 'pending' ? 'Pendente' : 'Atrasado'}
             </Text>
           </View>
 
-          {item.status === 'paid' && (
+          {item.status === 'paid' && isIncome && (
             <Text style={[styles.receiptAction, { color: theme.primary }]}>Emitir Recibo 🧾</Text>
           )}
 
@@ -190,69 +258,155 @@ export default function FinanceScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 2. DRE Metric KPIs Row */}
-      <View style={styles.kpiContainer}>
-        <View style={[styles.kpiCard, { backgroundColor: theme.card }]}>
-          <Text style={[styles.kpiLabel, { color: theme.textSec }]}>Receita Bruta</Text>
-          <Text style={[styles.kpiValue, { color: theme.success }]}>R$ {stats.receitaMes}</Text>
-        </View>
-
-        <View style={[styles.kpiCard, { backgroundColor: theme.card }]}>
-          <Text style={[styles.kpiLabel, { color: theme.textSec }]}>A Receber</Text>
-          <Text style={[styles.kpiValue, { color: '#D97706' }]}>R$ {stats.aReceber}</Text>
-        </View>
-
-        <View style={[styles.kpiCard, { backgroundColor: theme.card }, stats.inadimplencia > 0 && { borderColor: 'rgba(239, 68, 68, 0.25)', backgroundColor: theme.dangerLight }]}>
-          <Text style={[styles.kpiLabel, { color: theme.textSec }]}>Inadimplência</Text>
-          <Text style={[styles.kpiValue, { color: theme.danger }]}>R$ {stats.inadimplencia}</Text>
-        </View>
-      </View>
-
-      {/* 3. Transaction Filters */}
-      <View style={styles.filtersWrapper}>
-        <TouchableOpacity
-          style={[styles.filterTab, { backgroundColor: theme.card, borderColor: theme.border }, filter === 'all' && { backgroundColor: theme.primary, borderColor: theme.primary }]}
-          onPress={() => setFilter('all')}
-        >
-          <Text style={[styles.filterTabText, { color: theme.textSec }, filter === 'all' && { color: '#FFFFFF' }]}>Tudo</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.filterTab, { backgroundColor: theme.card, borderColor: theme.border }, filter === 'paid' && { backgroundColor: theme.primary, borderColor: theme.primary }]}
-          onPress={() => setFilter('paid')}
-        >
-          <Text style={[styles.filterTabText, { color: theme.textSec }, filter === 'paid' && { color: '#FFFFFF' }]}>Pagos</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.filterTab, { backgroundColor: theme.card, borderColor: theme.border }, filter === 'pending' && { backgroundColor: theme.primary, borderColor: theme.primary }]}
-          onPress={() => setFilter('pending')}
-        >
-          <Text style={[styles.filterTabText, { color: theme.textSec }, filter === 'pending' && { color: '#FFFFFF' }]}>Abertos</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.filterTab, { backgroundColor: theme.card, borderColor: theme.border }, filter === 'overdue' && { backgroundColor: theme.primary, borderColor: theme.primary }]}
-          onPress={() => setFilter('overdue')}
-        >
-          <Text style={[styles.filterTabText, { color: theme.textSec }, filter === 'overdue' && { color: '#FFFFFF' }]}>Atrasados</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* 4. Optimized Transactions List */}
-      <FlatList
-        data={filteredTransactions}
-        keyExtractor={(item) => item.id}
-        renderItem={renderTransactionItem}
-        contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={[styles.emptyCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            <Text style={[styles.emptyTitle, { color: theme.text }]}>Nenhum registro financeiro</Text>
-            <Text style={[styles.emptySub, { color: theme.textSec }]}>Todas as sessões encerradas ou despesas inseridas manualmente aparecerão aqui.</Text>
+      <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
+        {/* 2. DRE Metric KPIs Row */}
+        <View style={styles.balanceBanner}>
+          <View style={[styles.balanceCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Text style={[styles.balanceLabel, { color: theme.textSec }]}>Saldo do Consultório (Lucro Líquido)</Text>
+            <Text style={[styles.balanceValue, { color: stats.saldoLiquido >= 0 ? theme.success : theme.danger }]}>
+              R$ {stats.saldoLiquido.toFixed(2)}
+            </Text>
+            <Text style={[styles.balanceSub, { color: theme.textSec }]}>
+              Diferença entre receitas e despesas quitadas
+            </Text>
           </View>
-        }
-      />
+        </View>
+
+        {/* 2. Pie Chart DRE */}
+        {(() => {
+          const SIZE = 160;
+          const CX = SIZE / 2;
+          const CY = SIZE / 2;
+          const OUTER_R = SIZE / 2 - 4;
+          const INNER_R = SIZE / 2 - 34; // donut hole
+          
+          const segments = [
+            { label: 'Receitas', value: stats.receitaMes, color: '#10B981', emoji: '📥' },
+            { label: 'Despesas', value: stats.despesasMes, color: '#EF4444', emoji: '📤' },
+            { label: 'A Receber', value: stats.aReceber, color: '#F59E0B', emoji: '⏳' },
+            { label: 'Atrasos', value: stats.inadimplencia, color: '#F97316', emoji: '⚠️' },
+          ].filter(s => s.value > 0);
+
+          const total = segments.reduce((s, d) => s + d.value, 0);
+          
+          return (
+            <View style={[styles.chartCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+              <Text style={[styles.chartTitle, { color: theme.text }]}>Distribuição Financeira</Text>
+              <Text style={[styles.chartSub, { color: theme.textSec }]}>Visão geral de todos os lançamentos</Text>
+
+              <View style={styles.chartRow}>
+                {/* Donut chart SVG */}
+                {total === 0 ? (
+                  <View style={[styles.emptyChartCircle, { borderColor: theme.border }]}>
+                    <Text style={{ fontSize: 28 }}>📊</Text>
+                    <Text style={[{ fontSize: 10, color: theme.textSec, marginTop: 4 }]}>Sem dados</Text>
+                  </View>
+                ) : (() => {
+                  let angle = 0;
+                  return (
+                    <Svg width={SIZE} height={SIZE}>
+                      <G>
+                        {segments.map((seg, i) => {
+                          const sweep = (seg.value / total) * 360;
+                          const path = arcPath(CX, CY, OUTER_R, INNER_R, angle, angle + sweep);
+                          angle += sweep;
+                          return <Path key={i} d={path} fill={seg.color} />;
+                        })}
+                        {/* Center label */}
+                        <SvgText
+                          x={CX} y={CY - 8}
+                          textAnchor="middle"
+                          fontSize="11"
+                          fontWeight="bold"
+                          fill={isDarkMode ? '#94A3B8' : '#64748B'}
+                        >
+                          Total
+                        </SvgText>
+                        <SvgText
+                          x={CX} y={CY + 10}
+                          textAnchor="middle"
+                          fontSize="13"
+                          fontWeight="bold"
+                          fill={isDarkMode ? '#E2E8F0' : '#0F172A'}
+                        >
+                          R$ {total.toFixed(0)}
+                        </SvgText>
+                      </G>
+                    </Svg>
+                  );
+                })()}
+
+                {/* Legend */}
+                <View style={styles.legendColumn}>
+                  {([
+                    { label: 'Receitas', value: stats.receitaMes, color: '#10B981', emoji: '📥' },
+                    { label: 'Despesas', value: stats.despesasMes, color: '#EF4444', emoji: '📤' },
+                    { label: 'A Receber', value: stats.aReceber, color: '#F59E0B', emoji: '⏳' },
+                    { label: 'Atrasos', value: stats.inadimplencia, color: '#F97316', emoji: '⚠️' },
+                  ]).map((item, i) => (
+                    <View key={i} style={styles.legendItem}>
+                      <View style={[styles.legendDot, { backgroundColor: item.color }]} />
+                      <View>
+                        <Text style={[styles.legendLabel, { color: theme.textSec }]}>{item.emoji} {item.label}</Text>
+                        <Text style={[styles.legendValue, { color: item.value > 0 ? item.color : theme.textSec }]}>
+                          R$ {item.value.toFixed(2)}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            </View>
+          );
+        })()}
+
+        {/* 3. Transaction Filters */}
+        <View style={styles.filtersWrapper}>
+          <TouchableOpacity
+            style={[styles.filterTab, { backgroundColor: theme.card, borderColor: theme.border }, filter === 'all' && { backgroundColor: theme.primary, borderColor: theme.primary }]}
+            onPress={() => setFilter('all')}
+          >
+            <Text style={[styles.filterTabText, { color: theme.textSec }, filter === 'all' && { color: '#FFFFFF' }]}>📂 Tudo</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.filterTab, { backgroundColor: theme.card, borderColor: theme.border }, filter === 'paid' && { backgroundColor: theme.primary, borderColor: theme.primary }]}
+            onPress={() => setFilter('paid')}
+          >
+            <Text style={[styles.filterTabText, { color: theme.textSec }, filter === 'paid' && { color: '#FFFFFF' }]}>🟢 Pagos</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.filterTab, { backgroundColor: theme.card, borderColor: theme.border }, filter === 'pending' && { backgroundColor: theme.primary, borderColor: theme.primary }]}
+            onPress={() => setFilter('pending')}
+          >
+            <Text style={[styles.filterTabText, { color: theme.textSec }, filter === 'pending' && { color: '#FFFFFF' }]}>⏳ Abertos</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.filterTab, { backgroundColor: theme.card, borderColor: theme.border }, filter === 'overdue' && { backgroundColor: theme.primary, borderColor: theme.primary }]}
+            onPress={() => setFilter('overdue')}
+          >
+            <Text style={[styles.filterTabText, { color: theme.textSec }, filter === 'overdue' && { color: '#FFFFFF' }]}>⚠️ Atrasados</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 4. Optimized Transactions List (Wrapped inside a simple view with height constraints or mapped directly to avoid ScrollView conflicts) */}
+        <View style={styles.listWrapper}>
+          {filteredTransactions.length === 0 ? (
+            <View style={[styles.emptyCard, { backgroundColor: theme.card, borderColor: theme.border, marginHorizontal: 24 }]}>
+              <Text style={[styles.emptyTitle, { color: theme.text }]}>Nenhum registro financeiro</Text>
+              <Text style={[styles.emptySub, { color: theme.textSec }]}>Todas as sessões encerradas ou despesas inseridas manualmente aparecerão aqui.</Text>
+            </View>
+          ) : (
+            filteredTransactions.map((tx) => (
+              <View key={tx.id} style={{ paddingHorizontal: 24 }}>
+                {renderTransactionItem({ item: tx })}
+              </View>
+            ))
+          )}
+        </View>
+      </ScrollView>
 
       {/* 5. Manual Entry Modal */}
       <Modal
@@ -266,48 +420,54 @@ export default function FinanceScreen() {
             <Text style={[styles.modalTitle, { color: theme.text }]}>Nova Transação Fluxo de Caixa</Text>
             
             {/* Income / Expense Toggle Switch */}
+            <Text style={[styles.fieldLabel, { color: theme.textSec }]}>Tipo de Lançamento</Text>
             <View style={[styles.toggleRow, { backgroundColor: theme.inputBg }]}>
               <TouchableOpacity
                 style={[styles.toggleBtn, type === 'income' && styles.toggleBtnActiveIncome]}
                 onPress={() => setType('income')}
               >
-                <Text style={[styles.toggleBtnText, { color: theme.textSec }, type === 'income' && styles.toggleBtnTextActive]}>Receita (+)</Text>
+                <Text style={[styles.toggleBtnText, { color: theme.textSec }, type === 'income' && styles.toggleBtnTextActive]}>Receita (Entrada +)</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={[styles.toggleBtn, type === 'expense' && styles.toggleBtnActiveExpense]}
                 onPress={() => setType('expense')}
               >
-                <Text style={[styles.toggleBtnText, { color: theme.textSec }, type === 'expense' && styles.toggleBtnTextActive]}>Despesa (-)</Text>
+                <Text style={[styles.toggleBtnText, { color: theme.textSec }, type === 'expense' && styles.toggleBtnTextActive]}>Despesa (Saída -)</Text>
               </TouchableOpacity>
             </View>
 
             {/* Form Fields */}
+            <Text style={[styles.fieldLabel, { color: theme.textSec }]}>Descrição da Transação</Text>
             <TextInput
               style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
-              placeholder="Descrição (Ex: Sessão Particular, Aluguel)"
-              placeholderTextColor={theme.textSec}
+              placeholder="Ex: Sessão Particular, Aluguel da Sala"
+              placeholderTextColor={isDarkMode ? '#475569' : '#94A3B8'}
               value={description}
               onChangeText={setDescription}
             />
 
+            <Text style={[styles.fieldLabel, { color: theme.textSec }]}>Valor (R$)</Text>
             <TextInput
               style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
-              placeholder="Valor (Ex: 180,00)"
-              placeholderTextColor={theme.textSec}
+              placeholder="Ex: 180,00"
+              placeholderTextColor={isDarkMode ? '#475569' : '#94A3B8'}
               keyboardType="numeric"
               value={amount}
               onChangeText={setAmount}
             />
 
             {type === 'income' && (
-              <TextInput
-                style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
-                placeholder="Paciente (Opcional)"
-                placeholderTextColor={theme.textSec}
-                value={patientName}
-                onChangeText={setPatientName}
-              />
+              <>
+                <Text style={[styles.fieldLabel, { color: theme.textSec }]}>Nome do Paciente (Opcional)</Text>
+                <TextInput
+                  style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
+                  placeholder="Ex: Walace Ramos"
+                  placeholderTextColor={isDarkMode ? '#475569' : '#94A3B8'}
+                  value={patientName}
+                  onChangeText={setPatientName}
+                />
+              </>
             )}
 
             {/* Action CTAs */}
@@ -317,7 +477,7 @@ export default function FinanceScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity style={[styles.modalSave, { backgroundColor: theme.primary }]} onPress={handleSaveTransaction}>
-                <Text style={styles.modalSaveText}>Salvar Entrada</Text>
+                <Text style={styles.modalSaveText}>Salvar Lançamento</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -340,8 +500,6 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     paddingBottom: 16,
     backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
   },
   title: {
     fontSize: 22,
@@ -364,11 +522,103 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
   },
+  balanceBanner: {
+    paddingHorizontal: 24,
+    marginTop: 16,
+  },
+  balanceCard: {
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: 'rgba(0, 0, 0, 0.02)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  balanceLabel: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  balanceValue: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginVertical: 8,
+  },
+  balanceSub: {
+    fontSize: 11,
+    textAlign: 'center',
+  },
+  chartCard: {
+    marginHorizontal: 24,
+    marginTop: 16,
+    borderRadius: 20,
+    padding: 20,
+    borderWidth: 1,
+    shadowColor: 'rgba(0,0,0,0.02)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  chartTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 2,
+  },
+  chartSub: {
+    fontSize: 11,
+    marginBottom: 16,
+  },
+  chartRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  emptyChartCircle: {
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  legendColumn: {
+    flex: 1,
+    paddingLeft: 16,
+    justifyContent: 'center',
+    gap: 10,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  legendLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  legendValue: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginTop: 1,
+  },
   kpiContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 24,
-    marginTop: 16,
+    marginTop: 12,
   },
   kpiCard: {
     flex: 1,
@@ -376,16 +626,13 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 14,
     marginRight: 8,
-    shadowColor: 'rgba(0, 0, 0, 0.02)',
+    shadowColor: 'rgba(0, 0, 0, 0.01)',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 2,
     elevation: 1,
-  },
-  debtHighlight: {
     borderWidth: 1,
-    borderColor: 'rgba(220, 38, 38, 0.1)',
-    backgroundColor: '#FEF2F2',
+    borderColor: 'transparent',
   },
   kpiLabel: {
     fontSize: 11,
@@ -400,7 +647,7 @@ const styles = StyleSheet.create({
   filtersWrapper: {
     flexDirection: 'row',
     paddingHorizontal: 24,
-    marginTop: 16,
+    marginTop: 20,
     marginBottom: 8,
   },
   filterTab: {
@@ -413,20 +660,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E2E8F0',
   },
-  filterTabActive: {
-    backgroundColor: '#4F46E5',
-    borderColor: '#4F46E5',
-  },
   filterTabText: {
-    fontSize: 11,
-    color: '#475569',
+    fontSize: 10,
     fontWeight: 'bold',
   },
-  filterTabTextActive: {
-    color: '#FFFFFF',
-  },
-  listContainer: {
-    paddingHorizontal: 24,
+  listWrapper: {
     paddingTop: 12,
     paddingBottom: 40,
   },
@@ -435,6 +673,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 16,
     marginBottom: 12,
+    borderWidth: 1,
     shadowColor: 'rgba(0, 0, 0, 0.01)',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
@@ -444,21 +683,26 @@ const styles = StyleSheet.create({
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
   cardDesc: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#334155',
   },
   cardSub: {
     fontSize: 11,
-    color: '#64748B',
     marginTop: 4,
   },
   cardAmount: {
     fontSize: 14,
     fontWeight: 'bold',
+  },
+  amountBadge: {
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cardFooter: {
     flexDirection: 'row',
@@ -485,7 +729,6 @@ const styles = StyleSheet.create({
   },
   receiptAction: {
     fontSize: 11,
-    color: '#4F46E5',
     fontWeight: 'bold',
   },
   payAction: {
@@ -498,16 +741,15 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 32,
     alignItems: 'center',
-    marginTop: 30,
+    marginTop: 16,
+    borderWidth: 1,
   },
   emptyTitle: {
     fontSize: 14,
     fontWeight: 'bold',
-    color: '#0F172A',
   },
   emptySub: {
     fontSize: 11,
-    color: '#64748B',
     marginTop: 6,
     textAlign: 'center',
     lineHeight: 16,
@@ -532,16 +774,22 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#0F172A',
     marginBottom: 16,
     textAlign: 'center',
   },
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: 'bold',
+    marginBottom: 6,
+    marginTop: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   toggleRow: {
     flexDirection: 'row',
-    backgroundColor: '#F1F5F9',
     borderRadius: 10,
     padding: 4,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   toggleBtn: {
     flex: 1,
@@ -550,53 +798,46 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   toggleBtnActiveIncome: {
-    backgroundColor: '#059669',
+    backgroundColor: '#0D9488',
   },
   toggleBtnActiveExpense: {
-    backgroundColor: '#DC2626',
+    backgroundColor: '#EF4444',
   },
   toggleBtnText: {
     fontSize: 12,
     fontWeight: 'bold',
-    color: '#475569',
   },
   toggleBtnTextActive: {
     color: '#FFFFFF',
   },
   textInput: {
-    backgroundColor: '#F8FAFC',
-    borderColor: '#E2E8F0',
     borderWidth: 1,
     borderRadius: 12,
     height: 48,
     paddingHorizontal: 14,
     fontSize: 14,
-    color: '#0F172A',
     marginBottom: 12,
   },
   modalActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 12,
+    marginTop: 16,
   },
   modalCancel: {
     flex: 1,
     height: 48,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E2E8F0',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 8,
   },
   modalCancelText: {
-    color: '#64748B',
     fontSize: 13,
     fontWeight: 'bold',
   },
   modalSave: {
     flex: 2,
-    backgroundColor: '#4F46E5',
     height: 48,
     borderRadius: 12,
     justifyContent: 'center',

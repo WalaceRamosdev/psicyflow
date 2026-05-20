@@ -245,10 +245,11 @@ export const mockAPI = {
   },
 
   /**
-   * Stub initialization database
+   * Database initialization - only seeds demo data in development mode.
+   * Production accounts start clean and empty.
    */
   async initializeDatabase(therapistId: string): Promise<void> {
-    if (therapistId && therapistId !== 'guest') {
+    if (__DEV__ && therapistId && therapistId !== 'guest') {
       await seedDatabaseIfEmpty(therapistId);
     }
   },

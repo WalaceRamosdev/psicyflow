@@ -12,6 +12,8 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
 import { useAppointments } from '../../contexts/AppointmentContext';
+import { useClinicStore } from '../../src/services/clinicAPI';
+import { themes } from '../../src/styles/theme';
 import { fakeDecrypt } from '../../utils/security';
 import { Appointment } from '../../types';
 
@@ -21,12 +23,36 @@ export default function ClinicalNotesScreen() {
   const navigation = useNavigation();
   
   const { appointments, saveNotesDraft, finalizeNotes, isLoading } = useAppointments();
+  const summarizeNotesWithIA = useClinicStore((state) => state.summarizeNotesWithIA);
+  const isDarkMode = useClinicStore((state) => state.isDarkMode);
+  const theme = isDarkMode ? themes.dark : themes.light;
   
   const [noteText, setNoteText] = useState<string>("");
   const [isFinalized, setIsFinalized] = useState<boolean>(false);
   const [isAutoSaving, setIsAutoSaving] = useState<boolean>(false);
   const [lastSavedTime, setLastSavedTime] = useState<string>("");
   const [showEncryptedNotePreview, setShowEncryptedNotePreview] = useState<boolean>(false);
+  
+  const [isSynthesizing, setIsSynthesizing] = useState<boolean>(false);
+  const [aiSummary, setAiSummary] = useState<string>("");
+
+  const handleAISynthesis = async () => {
+    if (!noteText.trim()) {
+      Alert.alert("Aviso", "Por favor, digite os tópicos ou anotações brutas no editor para que a IA possa sintetizar.");
+      return;
+    }
+
+    setIsSynthesizing(true);
+    try {
+      const summary = await summarizeNotesWithIA(noteText);
+      setAiSummary(summary);
+    } catch (err) {
+      console.error("AI synthesis failed:", err);
+      Alert.alert("Erro de IA", "Não foi possível conectar ao serviço de inteligência artificial. Tente novamente mais tarde.");
+    } finally {
+      setIsSynthesizing(false);
+    }
+  };
 
   // Find corresponding appointment
   const appointment = useMemo(() => {
@@ -161,40 +187,40 @@ export default function ClinicalNotesScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
       <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         {/* Patient header card */}
-        <View style={styles.patientInfoCard}>
+        <View style={[styles.patientInfoCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={styles.badgeRow}>
-            <Text style={styles.patientName}>{appointment.patientName}</Text>
+            <Text style={[styles.patientName, { color: theme.text }]}>{appointment.patientName}</Text>
             <View style={[styles.statusTag, isFinalized ? styles.tagSuccess : styles.tagWarning]}>
               <Text style={[styles.statusTagText, isFinalized ? styles.textSuccess : styles.textWarning]}>
                 {isFinalized ? "🔒 Prontuário Fechado" : "📝 Rascunho Aberto"}
               </Text>
             </View>
           </View>
-          <Text style={styles.patientMeta}>CPF: ***.***.***-** | CRP Responsável: {appointment.patientId === 'p1' ? '06/12345-SP' : '06/98765-SP'}</Text>
+          <Text style={[styles.patientMeta, { color: theme.textSec }]}>CPF: ***.***.***-** | CRP Responsável: {appointment.patientId === 'p1' ? '06/12345-SP' : '06/98765-SP'}</Text>
         </View>
 
         {/* Sync/Status bar */}
         <View style={styles.syncContainer}>
           {isAutoSaving ? (
-            <Text style={styles.syncText}>🟢 Salvando rascunho na nuvem local...</Text>
+            <Text style={[styles.syncText, { color: theme.primary }]}>🟢 Salvando rascunho na nuvem local...</Text>
           ) : lastSavedTime ? (
-            <Text style={styles.syncText}>✅ Rascunho salvo às {lastSavedTime}</Text>
+            <Text style={[styles.syncText, { color: theme.primary }]}>✅ Rascunho salvo às {lastSavedTime}</Text>
           ) : (
-            <Text style={styles.syncText}>🛡️ Nuvem Segura Ativa (Auto-save de 4s)</Text>
+            <Text style={[styles.syncText, { color: theme.primary }]}>🛡️ Nuvem Segura Ativa (Auto-save de 4s)</Text>
           )}
         </View>
 
         {/* Text Area Input */}
-        <View style={styles.editorBox}>
+        <View style={[styles.editorBox, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <TextInput
-            style={[styles.editor, isFinalized && styles.editorDisabled]}
+            style={[styles.editor, isFinalized && styles.editorDisabled, { color: isFinalized ? theme.textSec : theme.text }]}
             value={isFinalized ? decryptedPastNote : noteText}
             onChangeText={setNoteText}
             placeholder="Registre aqui as anotações clínicas da sessão, evoluções do paciente, queixas, intervenções terapêuticas e próximos passos..."
-            placeholderTextColor="#64748B"
+            placeholderTextColor={isDarkMode ? '#475569' : '#64748B'}
             multiline
             textAlignVertical="top"
             editable={!isFinalized}
@@ -204,32 +230,84 @@ export default function ClinicalNotesScreen() {
 
         {/* Actions panel */}
         {!isFinalized ? (
-          <TouchableOpacity
-            style={styles.finalizeBtn}
-            onPress={handleFinalize}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.finalizeBtnText}>Finalizar e Criptografar Evolução 🔒</Text>
-          </TouchableOpacity>
+          <View>
+            <TouchableOpacity
+              style={[styles.aiBtn, isSynthesizing && styles.aiBtnDisabled, { backgroundColor: theme.primary }]}
+              onPress={handleAISynthesis}
+              disabled={isSynthesizing}
+              activeOpacity={0.8}
+            >
+              {isSynthesizing ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Text style={styles.aiBtnText}>✨ Sintetizar com IA (Gemini)</Text>
+              )}
+            </TouchableOpacity>
+
+            {aiSummary ? (
+              <View style={[styles.aiReviewCard, { backgroundColor: isDarkMode ? 'rgba(13, 148, 136, 0.08)' : '#F0FDFA', borderColor: isDarkMode ? '#0F766E' : '#5EEAD4' }]}>
+                <Text style={[styles.aiReviewTitle, { color: isDarkMode ? '#2DD4BF' : '#0F766E' }]}>🤖 Evolução Sugerida pela IA (Revisão):</Text>
+                <ScrollView style={[styles.aiReviewTextContainer, { backgroundColor: theme.inputBg, borderColor: isDarkMode ? theme.border : '#CCFBF1' }]} nestedScrollEnabled={true}>
+                  <Text style={[styles.aiReviewText, { color: theme.text }]}>{aiSummary}</Text>
+                </ScrollView>
+                <View style={styles.aiActionRow}>
+                  <TouchableOpacity 
+                    style={[styles.aiActionBtn, styles.aiApplyBtn]} 
+                    onPress={() => {
+                      setNoteText(aiSummary);
+                      setAiSummary("");
+                    }}
+                  >
+                    <Text style={styles.aiApplyBtnText}>Substituir Editor</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity 
+                    style={[styles.aiActionBtn, styles.aiAppendBtn, { backgroundColor: isDarkMode ? 'rgba(99, 102, 241, 0.08)' : '#E6F4F1', borderColor: theme.primary }]} 
+                    onPress={() => {
+                      setNoteText(prev => prev ? `${prev}\n\n${aiSummary}` : aiSummary);
+                      setAiSummary("");
+                    }}
+                  >
+                    <Text style={[styles.aiAppendBtnText, { color: theme.primary }]}>Anexar ao Fim</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity 
+                    style={[styles.aiActionBtn, styles.aiDiscardBtn, { backgroundColor: isDarkMode ? '#1E293B' : '#F1F5F9' }]} 
+                    onPress={() => setAiSummary("")}
+                  >
+                    <Text style={[styles.aiDiscardBtnText, { color: isDarkMode ? '#E2E8F0' : '#475569' }]}>Descartar</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : null}
+
+            <TouchableOpacity
+              style={[styles.finalizeBtn, { backgroundColor: theme.primary, marginTop: 16 }]}
+              onPress={handleFinalize}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.finalizeBtnText}>Finalizar e Criptografar Evolução 🔒</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
-          <View style={styles.cryptographyDemoCard}>
-            <Text style={styles.demoTitle}>🛡️ LGPD / HIPAA DEMONSTRAÇÃO DE CRIPTOGRAFIA</Text>
-            <Text style={styles.demoDesc}>
+          <View style={[styles.cryptographyDemoCard, { backgroundColor: isDarkMode ? 'rgba(99, 102, 241, 0.08)' : 'rgba(79, 70, 229, 0.05)', borderColor: theme.primary }]}>
+            <Text style={[styles.demoTitle, { color: theme.primary }]}>🛡️ LGPD / HIPAA DEMONSTRAÇÃO DE CRIPTOGRAFIA</Text>
+            <Text style={[styles.demoDesc, { color: theme.textSec }]}>
               A evolução deste prontuário foi criptografada e armazenada de forma segura na base. No simulador abaixo, veja como os dados aparecem em backups brutos sem a chave privada do terapeuta.
             </Text>
 
             <TouchableOpacity
-              style={styles.demoBtn}
+              style={[styles.demoBtn, { backgroundColor: theme.card, borderColor: theme.border }]}
               onPress={() => setShowEncryptedNotePreview(!showEncryptedNotePreview)}
               activeOpacity={0.7}
             >
-              <Text style={styles.demoBtnText}>
+              <Text style={[styles.demoBtnText, { color: theme.text }]}>
                 {showEncryptedNotePreview ? "Ocultar Estrutura de Banco" : "Ver Código Criptografado no Banco"}
               </Text>
             </TouchableOpacity>
 
             {showEncryptedNotePreview && (
-              <View style={styles.cipherBox}>
+              <View style={[styles.cipherBox, { backgroundColor: theme.inputBg, borderColor: theme.border }]}>
                 <Text style={styles.cipherLabel}>🔒 VALOR EM RAW STORAGE (BANCO DE DADOS):</Text>
                 <Text style={styles.cipherText}>{appointment.notesEncrypted}</Text>
               </View>
@@ -237,7 +315,7 @@ export default function ClinicalNotesScreen() {
           </View>
         )}
 
-        <Text style={styles.complianceNote}>
+        <Text style={[styles.complianceNote, { color: theme.textSec }]}>
           ⚠️ Lembrete Ético CFP: As informações registradas neste prontuário são confidenciais e protegidas pelo sigilo profissional (Art. 9º do Código de Ética dos Psicólogos).
         </Text>
       </ScrollView>
@@ -363,6 +441,93 @@ const styles = StyleSheet.create({
   finalizeBtnText: {
     color: '#FFFFFF',
     fontSize: 15,
+    fontWeight: 'bold',
+  },
+  aiBtn: {
+    backgroundColor: '#0D9488', // Teal for AI
+    height: 52,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 20,
+    shadowColor: '#0D9488',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
+    elevation: 3,
+  },
+  aiBtnDisabled: {
+    backgroundColor: '#94A3B8',
+  },
+  aiBtnText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  aiReviewCard: {
+    backgroundColor: '#F0FDFA', // Light Teal/Mint
+    borderColor: '#5EEAD4',
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 16,
+  },
+  aiReviewTitle: {
+    color: '#0F766E',
+    fontSize: 13,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  aiReviewTextContainer: {
+    maxHeight: 150,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#CCFBF1',
+    marginBottom: 12,
+  },
+  aiReviewText: {
+    color: '#0F172A',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  aiActionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  aiActionBtn: {
+    flex: 1,
+    height: 36,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  aiApplyBtn: {
+    backgroundColor: '#0D9488',
+  },
+  aiApplyBtnText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  aiAppendBtn: {
+    backgroundColor: '#E6F4F1',
+    borderWidth: 1,
+    borderColor: '#0D9488',
+  },
+  aiAppendBtnText: {
+    color: '#0D9488',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  aiDiscardBtn: {
+    backgroundColor: '#F1F5F9',
+  },
+  aiDiscardBtnText: {
+    color: '#475569',
+    fontSize: 12,
     fontWeight: 'bold',
   },
   cryptographyDemoCard: {

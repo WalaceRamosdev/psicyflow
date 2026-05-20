@@ -332,7 +332,7 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({ slug }) => {
           <h4>💳 Confirmar Pagamento</h4>
           {therapist?.pix_key ? (
             <>
-              <p>Realize o pagamento por PIX para garantir a reserva definitiva da sua vaga:</p>
+              <p>Realize o pagamento prioritariamente por PIX para garantir a reserva definitiva da sua vaga:</p>
               <div className="pix-wrapper">
                 <div className="pix-qr" style={{ fontSize: '11px', padding: '8px', wordBreak: 'break-all' }}>
                   {therapist.pix_key}
@@ -357,6 +357,13 @@ export const BookingCalendar: React.FC<BookingCalendarProps> = ({ slug }) => {
               <p style={{ fontSize: '11px', color: '#64748B', marginTop: '12px', textAlign: 'center' }}>
                 Valor: <strong style={{ color: '#0D9488' }}>R$ {successData.sessionValue}</strong> • Envie o comprovante ao profissional.
               </p>
+              
+              <div style={{ marginTop: '16px', borderTop: '1px solid #E2E8F0', paddingTop: '12px' }}>
+                <p style={{ fontSize: '12px', color: '#475569', textAlign: 'center' }}>
+                  <strong>Outras formas de pagamento:</strong><br />
+                  Se preferir, o pagamento também poderá ser realizado via Cartão de Crédito, Débito ou Dinheiro (a combinar na sessão).
+                </p>
+              </div>
             </>
           ) : (
             <p style={{ fontSize: '13px', color: '#94A3B8' }}>

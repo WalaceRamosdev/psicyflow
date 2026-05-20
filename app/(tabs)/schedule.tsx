@@ -92,7 +92,7 @@ export default function ScheduleScreen() {
           { text: "Cancelar", style: "cancel" },
           {
             text: "Salvar",
-            onPress: async (reason) => {
+            onPress: async (reason?: string) => {
               await updateAppointmentStatus(selectedAp.id, 'cancelled', reason || "Desistência");
               Alert.alert("Sucesso", "Cancelamento registrado e enviado para o ecossistema do site.");
             }
@@ -142,7 +142,7 @@ export default function ScheduleScreen() {
         `Sessão às ${item.time} (${item.type}). O que deseja fazer?`,
         [
           { text: "Editar Prontuário", onPress: () => router.push(`/record/${item.patientId}`) },
-          { text: "Ver Teleconsulta", onPress: () => router.push(`/session/${item.id}`), defaultValue: 'online' },
+          { text: "Ver Teleconsulta", onPress: () => router.push(`/session/${item.id}`) },
           { text: "Voltar", style: "cancel" }
         ]
       );
@@ -221,24 +221,24 @@ export default function ScheduleScreen() {
       {/* 2. Top Segmented Tabs for Dia/Semana/Mês */}
       <View style={[styles.tabsWrapper, { backgroundColor: theme.card, borderBottomWidth: 1, borderBottomColor: theme.divider }]}>
         <TouchableOpacity
-          style={[styles.tabBtn, viewMode === 'day' && styles.tabBtnActive, viewMode === 'day' && { borderBottomColor: theme.primary }]}
+          style={[styles.tabBtn, viewMode === 'day' && { backgroundColor: theme.primary }]}
           onPress={() => setViewMode('day')}
         >
-          <Text style={[styles.tabBtnText, { color: theme.textSec }, viewMode === 'day' && styles.tabBtnTextActive, viewMode === 'day' && { color: theme.primary }]}>Hoje</Text>
+          <Text style={[styles.tabBtnText, { color: theme.textSec }, viewMode === 'day' && { color: '#FFFFFF', fontWeight: 'bold' }]}>Hoje</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.tabBtn, viewMode === 'week' && styles.tabBtnActive, viewMode === 'week' && { borderBottomColor: theme.primary }]}
+          style={[styles.tabBtn, viewMode === 'week' && { backgroundColor: theme.primary }]}
           onPress={() => setViewMode('week')}
         >
-          <Text style={[styles.tabBtnText, { color: theme.textSec }, viewMode === 'week' && styles.tabBtnTextActive, viewMode === 'week' && { color: theme.primary }]}>Semana</Text>
+          <Text style={[styles.tabBtnText, { color: theme.textSec }, viewMode === 'week' && { color: '#FFFFFF', fontWeight: 'bold' }]}>Semana</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.tabBtn, viewMode === 'month' && styles.tabBtnActive, viewMode === 'month' && { borderBottomColor: theme.primary }]}
+          style={[styles.tabBtn, viewMode === 'month' && { backgroundColor: theme.primary }]}
           onPress={() => setViewMode('month')}
         >
-          <Text style={[styles.tabBtnText, { color: theme.textSec }, viewMode === 'month' && styles.tabBtnTextActive, viewMode === 'month' && { color: theme.primary }]}>Mês</Text>
+          <Text style={[styles.tabBtnText, { color: theme.textSec }, viewMode === 'month' && { color: '#FFFFFF', fontWeight: 'bold' }]}>Mês</Text>
         </TouchableOpacity>
       </View>
 

@@ -257,7 +257,7 @@ interface ClinicState {
   summarizeNotesWithIA: (bulletPoints: string) => Promise<string>;
 }
 
-export const useClinicStore = create<ClinicState>((set, get) => ({
+export const useClinicStore = create<ClinicState>()((set, get) => ({
   appointments: [],
   transactions: [],
   records: [],
@@ -438,7 +438,7 @@ export const useClinicStore = create<ClinicState>((set, get) => ({
     const therapistId = get().profile.id;
     if (!therapistId || therapistId === 'guest') return;
 
-    const dbStatus = newStatus === 'confirmed' ? 'confirmed' : newStatus === 'pending' ? 'pending' : 'cancelled';
+    const dbStatus = newStatus;
 
     // Optimistic local state update
     const updatedAppointments = get().appointments.map((ap) => {
@@ -496,13 +496,34 @@ export const useClinicStore = create<ClinicState>((set, get) => ({
 
   // 2. Módulo Financeiro
   addTransaction: async (tx: Omit<FinancialTransaction, 'id'>) => {
-    const therapistId = get().profile.id;
-    if (!therapistId || therapistId === 'guest') return;
-
+    const therapistId = get().profile.id || 'guest';
+    const tempId = `tx_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const tax = tx.type === 'income' ? tx.amount * 0.06 : 0;
-    const dbPayload = mapTransactionToDb({ ...tx, taxCalculated: tax }, therapistId);
+    
+    const localTx: FinancialTransaction = {
+      ...tx,
+      id: tempId,
+      taxCalculated: tax
+    };
+
+    // Optimistic state and AsyncStorage cache update
+    const updatedTxs = [localTx, ...get().transactions];
+    set({ transactions: updatedTxs });
+
+    const tenantTxsKey = `${OFFLINE_CACHE_KEYS.TRANSACTIONS}_${therapistId}`;
+    try {
+      await AsyncStorage.setItem(tenantTxsKey, JSON.stringify(updatedTxs));
+    } catch (cacheErr) {
+      console.warn("Failed to write financial cache:", cacheErr);
+    }
+
+    // If testing as guest, stop here (local-only persistence works perfectly)
+    if (therapistId === 'guest') {
+      return;
+    }
 
     try {
+      const dbPayload = mapTransactionToDb({ ...tx, taxCalculated: tax }, therapistId);
       const { data, error } = await supabase
         .from('financial_transactions')
         .insert(dbPayload)
@@ -513,16 +534,16 @@ export const useClinicStore = create<ClinicState>((set, get) => ({
 
       if (data) {
         const newTx = mapTransactionFromDb(data);
-        const updatedTxs = [newTx, ...get().transactions];
-        set({ transactions: updatedTxs });
-        
-        await AsyncStorage.setItem(
-          `${OFFLINE_CACHE_KEYS.TRANSACTIONS}_${therapistId}`, 
-          JSON.stringify(updatedTxs)
-        );
+        // Replace tempId with the real database uuid
+        set((state) => {
+          const finalTxs = state.transactions.map((t) => t.id === tempId ? newTx : t);
+          AsyncStorage.setItem(tenantTxsKey, JSON.stringify(finalTxs)).catch(e => console.warn(e));
+          return { transactions: finalTxs };
+        });
       }
     } catch (err) {
-      console.error("Failed to add transaction on Supabase:", err);
+      console.error("Failed to sync new transaction to Supabase:", err);
+      // Keep local transaction, it will be synced in the next syncWithWebEcosystem call
     }
   },
 
@@ -646,12 +667,14 @@ export const useClinicStore = create<ClinicState>((set, get) => ({
       
       throw new Error("Resposta vazia ou inválida da Edge Function.");
     } catch (error) {
+
       console.warn("[Gemini Edge Function Error] Falha ao sintetizar com IA, usando fallback mock:", error);
+
       // Fallback local caso a internet caia ou a Edge Function falhe temporariamente
+
       const sentences = bulletPoints.split(/[,;\n]/).map(s => s.trim()).filter(Boolean);
       const techDraft = sentences.join(", ");
       return `Paciente compareceu à consulta clínica relatando que: ${techDraft}. Em análise técnica, observam-se gatilhos comportamentais condizentes com o quadro do paciente. Foram aplicadas técnicas cognitivas integradas, com foco em habilidades de coping. Paciente demonstrou boa adesão técnica e estruturou meta para a próxima sessão.`;
     }
   }
-});
-
+}));

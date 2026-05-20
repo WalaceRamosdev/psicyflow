@@ -61,7 +61,7 @@ const NavigationGuard: React.FC = () => {
         name="notes/[id]"
         options={{
           title: "Evolução do Paciente",
-          headerBackTitleVisible: false,
+          headerBackTitle: '',
           headerStyle: {
             backgroundColor: '#FFFFFF',
           },

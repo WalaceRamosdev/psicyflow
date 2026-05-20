@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useClinicStore } from '../../src/services/clinicAPI';
+import { themes } from '../../src/styles/theme';
 
 export default function ProfessionalSettingsScreen() {
   const router = useRouter();
@@ -23,6 +24,8 @@ export default function ProfessionalSettingsScreen() {
   const updateProfessionalProfile = useClinicStore((state) => state.updateProfessionalProfile);
   const updateAppointmentRules = useClinicStore((state) => state.updateAppointmentRules);
   const isSyncing = useClinicStore((state) => state.isSyncing);
+  const isDarkMode = useClinicStore((state) => state.isDarkMode);
+  const theme = isDarkMode ? themes.dark : themes.light;
 
   // Meu Site local states
   const [domain, setDomain] = useState<string>(profile.officeDomain || '');
@@ -38,6 +41,7 @@ export default function ProfessionalSettingsScreen() {
   const [buffer, setBuffer] = useState<string>(profile.bookingRules.bufferMinutes.toString());
   const [lunchStart, setLunchStart] = useState<string>(profile.bookingRules.lunchStart);
   const [lunchEnd, setLunchEnd] = useState<string>(profile.bookingRules.lunchEnd);
+  const [pixKey, setPixKey] = useState<string>(profile.pixKey || '');
 
   const shareLink = `http://localhost:4321/${domain || profile.id}`;
 
@@ -74,7 +78,8 @@ export default function ProfessionalSettingsScreen() {
         officeDomainLinked: isLinked,
         sessionValue: valSession,
         firstSessionValue: valFirst,
-        cancellationPolicy: policy
+        cancellationPolicy: policy,
+        pixKey: pixKey
       });
 
       // 2. Update Scheduling Rules
@@ -98,46 +103,46 @@ export default function ProfessionalSettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: theme.bg }]}>
       {/* Header Banner */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Text style={styles.backBtnText}>← Voltar</Text>
+      <View style={[styles.header, { backgroundColor: theme.headerBg, borderBottomColor: theme.border }]}>
+        <TouchableOpacity style={[styles.backBtn, { backgroundColor: isDarkMode ? '#1E293B' : '#F1F5F9' }]} onPress={() => router.back()}>
+          <Text style={[styles.backBtnText, { color: isDarkMode ? '#E2E8F0' : '#475569' }]}>← Voltar</Text>
         </TouchableOpacity>
-        <Text style={styles.title}>ERP Clínico Configs</Text>
+        <Text style={[styles.title, { color: theme.text }]}>ERP Clínico Configs</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         
         {/* 1. SEÇÃO MEU SITE (Presença Digital) */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🌐 Presença Digital (Meu Site)</Text>
-          <View style={styles.card}>
-            <Text style={styles.label}>Domínio Clínico Associado</Text>
+          <Text style={[styles.sectionTitle, { color: theme.textSec }]}>🌐 Presença Digital (Meu Site)</Text>
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
+            <Text style={[styles.label, { color: theme.textSec }]}>Domínio Clínico Associado</Text>
             <TextInput
-              style={styles.textInput}
+              style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
               placeholder="Ex: drasilva.com.br"
-              placeholderTextColor="#94A3B8"
+              placeholderTextColor={isDarkMode ? '#475569' : '#94A3B8'}
               value={domain}
               onChangeText={setDomain}
             />
 
-            <View style={styles.switchRow}>
+            <View style={[styles.switchRow, { borderBottomColor: theme.divider }]}>
               <View style={styles.switchTexts}>
-                <Text style={styles.switchLabel}>Manter Site Ativo e Sincronizado</Text>
-                <Text style={styles.switchSub}>Qualquer alteração no app reflete no site instantaneamente</Text>
+                <Text style={[styles.switchLabel, { color: theme.text }]}>Manter Site Ativo e Sincronizado</Text>
+                <Text style={[styles.switchSub, { color: theme.textSec }]}>Qualquer alteração no app reflete no site instantaneamente</Text>
               </View>
               <Switch
                 value={isLinked}
                 onValueChange={setIsLinked}
-                trackColor={{ false: '#E2E8F0', true: '#4F46E5' }}
-                thumbColor={isLinked ? '#FFFFFF' : '#94A3B8'}
+                trackColor={{ false: isDarkMode ? '#1E293B' : '#E2E8F0', true: theme.primary }}
+                thumbColor={isLinked ? '#FFFFFF' : (isDarkMode ? '#475569' : '#94A3B8')}
               />
             </View>
 
-            <Text style={styles.label}>Biografia do Perfil (Site)</Text>
+            <Text style={[styles.label, { color: theme.textSec }]}>Biografia do Perfil (Site)</Text>
             <TextInput
-              style={[styles.textInput, styles.textArea]}
+              style={[styles.textInput, styles.textArea, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
               multiline={true}
               numberOfLines={3}
               value={bio}
@@ -145,32 +150,32 @@ export default function ProfessionalSettingsScreen() {
             />
 
             {/* Generated Booking Link */}
-            <View style={styles.linkContainer}>
-              <Text style={styles.linkLabel}>Link de Agendamento Online:</Text>
-              <Text style={styles.linkUrl} numberOfLines={1}>{shareLink}</Text>
+            <View style={[styles.linkContainer, { backgroundColor: isDarkMode ? 'rgba(99, 102, 241, 0.08)' : 'rgba(79, 70, 229, 0.04)', borderColor: theme.border }]}>
+              <Text style={[styles.linkLabel, { color: theme.primary }]}>Link de Agendamento Online:</Text>
+              <Text style={[styles.linkUrl, { color: theme.text }]} numberOfLines={1}>{shareLink}</Text>
               
               <View style={styles.buttonRow}>
-                <TouchableOpacity style={[styles.copyBtn, { flex: 1, marginRight: 8 }]} onPress={handleCopyLink}>
-                  <Text style={styles.copyBtnText}>Copiar Link 📋</Text>
+                <TouchableOpacity style={[styles.copyBtn, { flex: 1, marginRight: 8, backgroundColor: theme.card, borderColor: theme.primary }]} onPress={handleCopyLink}>
+                  <Text style={[styles.copyBtnText, { color: theme.primary }]}>Copiar Link 📋</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={[styles.shareBtn, { flex: 1 }]} onPress={handleShareLink}>
+                <TouchableOpacity style={[styles.shareBtn, { flex: 1, backgroundColor: theme.primary }]} onPress={handleShareLink}>
                   <Text style={styles.shareBtnText}>Compartilhar 🔗</Text>
                 </TouchableOpacity>
               </View>
             </View>
 
             {/* Access telemetry statistics */}
-            <View style={styles.analyticsBox}>
-              <Text style={styles.analyticsTitle}>Cliques no Botão do Consultório (Site)</Text>
+            <View style={[styles.analyticsBox, { borderTopColor: theme.divider }]}>
+              <Text style={[styles.analyticsTitle, { color: theme.textSec }]}>Cliques no Botão do Consultório (Site)</Text>
               <View style={styles.analyticsRow}>
-                <View style={styles.analyticsItem}>
-                  <Text style={styles.analyticsVal}>{profile.analytics.cliques24h}</Text>
-                  <Text style={styles.analyticsLabel}>Últimas 24 horas</Text>
+                <View style={[styles.analyticsItem, { backgroundColor: theme.inputBg }]}>
+                  <Text style={[styles.analyticsVal, { color: theme.text }]}>{profile.analytics.cliques24h}</Text>
+                  <Text style={[styles.analyticsLabel, { color: theme.textSec }]}>Últimas 24 horas</Text>
                 </View>
-                <View style={styles.analyticsItem}>
-                  <Text style={styles.analyticsVal}>{profile.analytics.cliques7d}</Text>
-                  <Text style={styles.analyticsLabel}>Últimos 7 dias</Text>
+                <View style={[styles.analyticsItem, { backgroundColor: theme.inputBg }]}>
+                  <Text style={[styles.analyticsVal, { color: theme.text }]}>{profile.analytics.cliques7d}</Text>
+                  <Text style={[styles.analyticsLabel, { color: theme.textSec }]}>Últimos 7 dias</Text>
                 </View>
               </View>
             </View>
@@ -179,14 +184,14 @@ export default function ProfessionalSettingsScreen() {
 
         {/* 2. SEÇÃO REGRAS DE NEGÓCIO */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⚙️ Regras de Negócio e Valores</Text>
-          <View style={styles.card}>
+          <Text style={[styles.sectionTitle, { color: theme.textSec }]}>⚙️ Regras de Negócio e Valores</Text>
+          <View style={[styles.card, { backgroundColor: theme.card }]}>
             {/* Financial rules */}
             <View style={styles.row}>
               <View style={styles.col}>
-                <Text style={styles.label}>Valor Sessão (R$)</Text>
+                <Text style={[styles.label, { color: theme.textSec }]}>Valor Sessão (R$)</Text>
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
                   keyboardType="numeric"
                   value={sessionValue}
                   onChangeText={setSessionValue}
@@ -194,9 +199,9 @@ export default function ProfessionalSettingsScreen() {
               </View>
 
               <View style={[styles.col, { marginLeft: 12 }]}>
-                <Text style={styles.label}>1ª Consulta (R$)</Text>
+                <Text style={[styles.label, { color: theme.textSec }]}>1ª Consulta (R$)</Text>
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
                   keyboardType="numeric"
                   value={firstValue}
                   onChangeText={setFirstValue}
@@ -204,30 +209,41 @@ export default function ProfessionalSettingsScreen() {
               </View>
             </View>
 
-            <Text style={styles.label}>Política de Cancelamento</Text>
+            <Text style={[styles.label, { color: theme.textSec }]}>Política de Cancelamento</Text>
             <TextInput
-              style={styles.textInput}
+              style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
               value={policy}
               onChangeText={setPolicy}
+            />
+
+            <Text style={[styles.label, { color: theme.textSec }]}>Chave PIX (Para Recebimentos)</Text>
+            <TextInput
+              style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
+              placeholder="Ex: seu-email@gmail.com ou CPF/CNPJ"
+              placeholderTextColor={isDarkMode ? '#475569' : '#94A3B8'}
+              value={pixKey}
+              onChangeText={setPixKey}
             />
 
             {/* Time rules */}
             <View style={styles.row}>
               <View style={styles.col}>
-                <Text style={styles.label}>Início Expediente</Text>
+                <Text style={[styles.label, { color: theme.textSec }]}>Início Expediente</Text>
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
                   placeholder="08:00"
+                  placeholderTextColor={isDarkMode ? '#475569' : '#94A3B8'}
                   value={startHour}
                   onChangeText={setStartHour}
                 />
               </View>
 
               <View style={[styles.col, { marginLeft: 12 }]}>
-                <Text style={styles.label}>Fim Expediente</Text>
+                <Text style={[styles.label, { color: theme.textSec }]}>Fim Expediente</Text>
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
                   placeholder="18:00"
+                  placeholderTextColor={isDarkMode ? '#475569' : '#94A3B8'}
                   value={endHour}
                   onChangeText={setEndHour}
                 />
@@ -235,9 +251,9 @@ export default function ProfessionalSettingsScreen() {
             </View>
 
             {/* Buffer between sessions */}
-            <Text style={styles.label}>Intervalo entre Sessões (Buffer min)</Text>
+            <Text style={[styles.label, { color: theme.textSec }]}>Intervalo entre Sessões (Buffer min)</Text>
             <TextInput
-              style={styles.textInput}
+              style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
               keyboardType="numeric"
               value={buffer}
               onChangeText={setBuffer}
@@ -246,20 +262,22 @@ export default function ProfessionalSettingsScreen() {
             {/* Lunch breaks */}
             <View style={styles.row}>
               <View style={styles.col}>
-                <Text style={styles.label}>Início Almoço</Text>
+                <Text style={[styles.label, { color: theme.textSec }]}>Início Almoço</Text>
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
                   placeholder="12:00"
+                  placeholderTextColor={isDarkMode ? '#475569' : '#94A3B8'}
                   value={lunchStart}
                   onChangeText={setLunchStart}
                 />
               </View>
 
               <View style={[styles.col, { marginLeft: 12 }]}>
-                <Text style={styles.label}>Fim Almoço</Text>
+                <Text style={[styles.label, { color: theme.textSec }]}>Fim Almoço</Text>
                 <TextInput
-                  style={styles.textInput}
+                  style={[styles.textInput, { backgroundColor: theme.inputBg, borderColor: theme.border, color: theme.text }]}
                   placeholder="13:00"
+                  placeholderTextColor={isDarkMode ? '#475569' : '#94A3B8'}
                   value={lunchEnd}
                   onChangeText={setLunchEnd}
                 />
@@ -269,7 +287,7 @@ export default function ProfessionalSettingsScreen() {
         </View>
 
         {/* Save CTA */}
-        <TouchableOpacity style={styles.saveBtn} onPress={handleSaveSettings} activeOpacity={0.8}>
+        <TouchableOpacity style={[styles.saveBtn, { backgroundColor: theme.primary }]} onPress={handleSaveSettings} activeOpacity={0.8}>
           <Text style={styles.saveBtnText}>
             {isSyncing ? "Sincronizando..." : "Salvar e Sincronizar Ecossistema 🔄"}
           </Text>
